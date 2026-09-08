@@ -101,6 +101,9 @@ contextBridge.exposeInMainWorld('api', {
     }
   },
 
+  // App Version
+  getVersion: () => ipcRenderer.invoke('app:getVersion'),
+
   // AdBlocker
   adblock: {
     getStats: () => ipcRenderer.invoke('adblock:getStats'),

@@ -26,6 +26,8 @@ export default function Sidebar({
   onNewTab,
   pinnedTabs,
   onSelectPinnedTab,
+  onUnpinTab,
+  onTogglePinTab,
   activeProfile,
   onOpenProfiles,
   onOpenSettings,
@@ -39,8 +41,11 @@ export default function Sidebar({
   const [newSpaceName, setNewSpaceName] = useState('');
   const [showAddSpace, setShowAddSpace] = useState(false);
 
-  // Tabs for the currently selected space
+  // Tabs for the currently selected space (pinned tabs first)
   const currentSpaceTabs = tabs.filter(t => t.spaceId === activeSpaceId);
+  const pinnedSpaceTabs = currentSpaceTabs.filter(t => t.isPinned);
+  const unpinnedSpaceTabs = currentSpaceTabs.filter(t => !t.isPinned);
+  const orderedSpaceTabs = [...pinnedSpaceTabs, ...unpinnedSpaceTabs];
   const activeSpace = spaces.find(s => s.id === activeSpaceId) || spaces[0];
 
   const handleCreateSpaceSubmit = (e) => {
@@ -228,22 +233,42 @@ export default function Sidebar({
           </div>
         )}
         <div className={`flex gap-1.5 ${collapsed ? 'flex-col' : 'flex-wrap'}`}>
-          {pinnedTabs.map(pin => (
-            <button
-              key={pin.id}
-              onClick={() => onSelectPinnedTab(pin)}
-              className="p-1.5 rounded-xl hover:bg-slate-800 text-slate-400 hover:text-slate-100 transition-colors flex items-center justify-center bg-slate-950/40 border border-slate-800/60"
-              title={pin.title}
-            >
-              {pin.favicon ? (
-                <img src={pin.favicon} alt="" className="w-4 h-4 rounded" onError={(e) => { e.target.style.display = 'none'; }} />
-              ) : (
-                <div className="w-4 h-4 rounded bg-indigo-600/30 flex items-center justify-center text-[9px] text-indigo-300 font-bold">
-                  {pin.title[0]}
-                </div>
-              )}
-            </button>
-          ))}
+          {pinnedTabs.map(pin => {
+            const isPinActive = tabs.some(t => t.id === activeTabId && (t.url === pin.url || (pin.tabId && t.id === pin.tabId)));
+            return (
+              <div key={pin.id} className="relative group">
+                <button
+                  onClick={() => onSelectPinnedTab(pin)}
+                  className={`p-1.5 rounded-xl transition-all flex items-center justify-center border ${
+                    isPinActive 
+                      ? 'bg-indigo-600/30 text-indigo-200 border-indigo-500/80 shadow-sm ring-1 ring-indigo-500/50' 
+                      : 'bg-slate-950/40 border-slate-800/60 text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+                  }`}
+                  title={`${pin.title} (${pin.url})`}
+                >
+                  {pin.favicon ? (
+                    <img src={pin.favicon} alt="" className="w-4 h-4 rounded" onError={(e) => { e.target.style.display = 'none'; }} />
+                  ) : (
+                    <div className="w-4 h-4 rounded bg-indigo-600/30 flex items-center justify-center text-[9px] text-indigo-300 font-bold">
+                      {pin.title[0]}
+                    </div>
+                  )}
+                </button>
+                {onUnpinTab && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onUnpinTab(pin);
+                    }}
+                    className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 p-0.5 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-full transition-opacity shadow z-10"
+                    title="Открепить вкладку"
+                  >
+                    <X size={9} />
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -271,7 +296,7 @@ export default function Sidebar({
           </div>
         )}
 
-        {currentSpaceTabs.map(tab => {
+        {orderedSpaceTabs.map(tab => {
           const isActive = tab.id === activeTabId;
           return (
             <div
@@ -308,12 +333,22 @@ export default function Sidebar({
                     <Volume2 size={8} />
                   </span>
                 )}
+
+                {/* Collapsed mode pinned indicator */}
+                {collapsed && tab.isPinned && (
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full ring-1 ring-slate-900" title="Закрепленная вкладка" />
+                )}
               </div>
 
               {/* Title (hidden when collapsed) */}
               {!collapsed && (
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs truncate font-normal">{tab.title || 'Новая вкладка'}</p>
+                <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                  {tab.isPinned && (
+                    <Pin size={10} className="text-indigo-400 shrink-0" title="Закрепленная вкладка" />
+                  )}
+                  <p className={`text-xs truncate ${tab.isPinned ? 'font-medium text-slate-100' : 'font-normal'}`}>
+                    {tab.title || 'Новая вкладка'}
+                  </p>
                 </div>
               )}
 
@@ -322,18 +357,32 @@ export default function Sidebar({
                 <span className="text-[10px] text-amber-400/80 font-mono">💤</span>
               )}
 
-              {/* Close Tab Button */}
+              {/* Action Buttons on Hover */}
               {!collapsed && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onCloseTab(tab.id);
-                  }}
-                  className="opacity-0 group-hover:opacity-100 p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-slate-100 transition-opacity"
-                  title="Закрыть вкладку (Ctrl + W)"
-                >
-                  <X size={12} />
-                </button>
+                <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
+                  {tab.isPinned && onTogglePinTab && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onTogglePinTab(tab);
+                      }}
+                      className="p-1 hover:bg-slate-700 rounded text-indigo-300 hover:text-indigo-100 transition-colors"
+                      title="Открепить вкладку"
+                    >
+                      <Pin size={11} className="rotate-45" />
+                    </button>
+                  )}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(tab.id);
+                    }}
+                    className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-slate-100 transition-colors"
+                    title={tab.isPinned ? "Закрыть и открепить вкладку (Ctrl + W)" : "Закрыть вкладку (Ctrl + W)"}
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
               )}
             </div>
           );

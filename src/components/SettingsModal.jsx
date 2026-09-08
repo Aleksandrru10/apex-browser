@@ -20,9 +20,16 @@ export default function SettingsModal({
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [downloadedFilePath, setDownloadedFilePath] = useState(null);
   const [errorMessage, setErrorMessage] = useState('');
+  const [currentAppVersion, setCurrentAppVersion] = useState('1.0.4');
 
   useEffect(() => {
     if (!isOpen) return;
+
+    if (window.api?.getVersion) {
+      window.api.getVersion().then(ver => {
+        if (ver) setCurrentAppVersion(ver);
+      });
+    }
 
     if (window.api?.updater?.onProgress) {
       const cleanup = window.api.updater.onProgress((p) => {
@@ -41,6 +48,9 @@ export default function SettingsModal({
       const res = await window.api.updater.check();
       if (res.success) {
         setUpdateInfo(res);
+        if (res.currentVersion) {
+          setCurrentAppVersion(res.currentVersion);
+        }
         if (res.hasUpdate) {
           setUpdateStatus('available');
         } else {
@@ -320,7 +330,7 @@ export default function SettingsModal({
             <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-400">Установленная версия:</span>
-                <span className="font-mono font-bold text-slate-200">v1.0.0</span>
+                <span className="font-mono font-bold text-slate-200">v{currentAppVersion}</span>
               </div>
 
               {updateStatus === 'up_to_date' && (
@@ -407,7 +417,7 @@ export default function SettingsModal({
           <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px] text-slate-500">
             <div className="flex items-center gap-1.5">
               <Info size={13} />
-              <span>Apex Browser v1.0.0 (Chromium Core, Electron 34, React 19)</span>
+              <span>Apex Browser v{currentAppVersion} (Chromium Core, Electron 34, React 19)</span>
             </div>
             <span>Fusion of Arc, Edge, Firefox & Chrome</span>
           </div>

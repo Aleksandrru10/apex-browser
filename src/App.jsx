@@ -139,6 +139,7 @@ export default function App() {
 
   // Webview element references map: tabId -> webview DOM element
   const webviewMap = useRef(new Map());
+  const isStateLoaded = useRef(false);
 
   const handleRegisterWebview = useCallback((tabId, el) => {
     if (el) {
@@ -147,6 +148,58 @@ export default function App() {
       webviewMap.current.delete(tabId);
     }
   }, []);
+
+  // Centralized State Persistence
+  const saveBrowserState = useCallback(async (customOverrides = {}) => {
+    if (!window.api?.state?.save) return;
+    try {
+      const currentTabs = customOverrides.tabs || tabs;
+      const currentPinned = customOverrides.pinnedTabs || pinnedTabs;
+      const currentSpaces = customOverrides.spaces || spaces;
+      const currentActiveSpaceId = customOverrides.activeSpaceId || activeSpaceId;
+      const currentActiveTabId = customOverrides.activeTabId || activeTabId;
+      const currentSettings = customOverrides.settings || settings;
+
+      const stateToSave = {
+        spaces: currentSpaces,
+        activeSpaceId: currentActiveSpaceId,
+        pinnedTabs: currentPinned,
+        tabs: currentTabs.map(t => ({
+          id: t.id,
+          spaceId: t.spaceId,
+          title: t.title,
+          url: t.url,
+          favicon: t.favicon,
+          isPinned: !!t.isPinned
+        })),
+        activeTabId: currentActiveTabId,
+        settings: currentSettings
+      };
+      await window.api.state.save(stateToSave);
+    } catch (err) {
+      console.error('Failed to save browser state:', err);
+    }
+  }, [tabs, pinnedTabs, spaces, activeSpaceId, activeTabId, settings]);
+
+  // Auto-save state when tabs, pinnedTabs, spaces, or activeSpaceId change (debounced)
+  useEffect(() => {
+    if (!isStateLoaded.current) return;
+    const timer = setTimeout(() => {
+      saveBrowserState();
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [tabs, pinnedTabs, spaces, activeSpaceId, settings, saveBrowserState]);
+
+  // Window beforeunload save
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (isStateLoaded.current && window.api?.state?.save) {
+        saveBrowserState();
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [saveBrowserState]);
 
   // Initial Data Load
   useEffect(() => {
@@ -178,9 +231,77 @@ export default function App() {
       if (savedState) {
         if (savedState.spaces) setSpaces(savedState.spaces);
         if (savedState.activeSpaceId) setActiveSpaceId(savedState.activeSpaceId);
-        if (savedState.pinnedTabs) setPinnedTabs(savedState.pinnedTabs);
         if (savedState.settings) setSettings(prev => ({ ...prev, ...savedState.settings }));
+
+        const rawPinned = savedState.pinnedTabs || [];
+        setPinnedTabs(rawPinned);
+
+        // Restore pinned tabs into tabs list
+        const savedTabsList = savedState.tabs || [];
+        const pinnedFromSavedTabs = savedTabsList.filter(t => t.isPinned);
+
+        // Combine pinned tabs from tabs and pinnedTabs dock
+        const allPinned = [...pinnedFromSavedTabs];
+        rawPinned.forEach(p => {
+          if (!allPinned.some(t => t.url === p.url || (p.tabId && t.id === p.tabId))) {
+            allPinned.push({
+              id: p.tabId || p.id || ('tab_pin_' + Math.random().toString(36).substring(2, 8)),
+              spaceId: p.spaceId || savedState.activeSpaceId || 'space_general',
+              title: p.title || 'Закрепленная вкладка',
+              url: p.url,
+              favicon: p.favicon || '',
+              isPinned: true
+            });
+          }
+        });
+
+        if (allPinned.length > 0) {
+          const restoredPinnedTabs = allPinned.map(pt => ({
+            id: pt.id || ('tab_pin_' + Math.random().toString(36).substring(2, 8)),
+            spaceId: pt.spaceId || savedState.activeSpaceId || 'space_general',
+            title: pt.title || 'Закрепленная вкладка',
+            url: pt.url,
+            favicon: pt.favicon || '',
+            isLoading: false,
+            canGoBack: false,
+            canGoForward: false,
+            isPlayingAudio: false,
+            isSleeping: false,
+            isPinned: true
+          }));
+
+          // Also check for unpinned saved tabs (excluding blank apex://newtab)
+          const unpinnedSavedTabs = savedTabsList
+            .filter(t => !t.isPinned && t.url && t.url !== 'apex://newtab')
+            .map(ut => ({
+              id: ut.id || ('tab_' + Math.random().toString(36).substring(2, 8)),
+              spaceId: ut.spaceId || savedState.activeSpaceId || 'space_general',
+              title: ut.title || 'Вкладка',
+              url: ut.url,
+              favicon: ut.favicon || '',
+              isLoading: false,
+              canGoBack: false,
+              canGoForward: false,
+              isPlayingAudio: false,
+              isSleeping: false,
+              isPinned: false
+            }));
+
+          const combinedTabs = [...restoredPinnedTabs, ...unpinnedSavedTabs];
+          setTabs(combinedTabs);
+
+          // Restore active tab: prefer saved activeTabId if present, else first pinned tab
+          if (savedState.activeTabId && combinedTabs.some(t => t.id === savedState.activeTabId)) {
+            setActiveTabId(savedState.activeTabId);
+          } else {
+            setActiveTabId(combinedTabs[0].id);
+          }
+        }
       }
+      isStateLoaded.current = true;
+    }).catch(err => {
+      console.error('Error loading initial browser state:', err);
+      isStateLoaded.current = true;
     });
 
     // Load bookmarks, history, downloads, adblock
@@ -285,7 +406,30 @@ export default function App() {
   };
 
   const handleUpdateTab = (id, updates) => {
-    setTabs(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    setTabs(prev => {
+      const next = prev.map(t => t.id === id ? { ...t, ...updates } : t);
+      return next;
+    });
+
+    // If this tab is pinned, keep pinnedTabs dock and disk storage synchronized
+    setPinnedTabs(prev => {
+      const tab = tabs.find(t => t.id === id);
+      const isPinned = tab?.isPinned || prev.some(p => p.tabId === id || (tab && p.url === tab.url));
+      if (isPinned) {
+        return prev.map(p => {
+          if (p.tabId === id || (tab && p.url === tab.url)) {
+            return {
+              ...p,
+              title: updates.title !== undefined ? updates.title : p.title,
+              url: updates.url !== undefined ? updates.url : p.url,
+              favicon: updates.favicon !== undefined ? updates.favicon : p.favicon
+            };
+          }
+          return p;
+        });
+      }
+      return prev;
+    });
   };
 
   const handleNewTab = (customUrl = 'apex://newtab') => {
@@ -300,21 +444,36 @@ export default function App() {
       canGoBack: false,
       canGoForward: false,
       isPlayingAudio: false,
-      isSleeping: false
+      isSleeping: false,
+      isPinned: false
     };
     setTabs(prev => [...prev, newTab]);
     setActiveTabId(newId);
   };
 
   const handleCloseTab = (id) => {
+    const tabToClose = tabs.find(t => t.id === id);
     if (tabs.length === 1) {
-      // Just reset current tab to new tab
-      handleUpdateTab(id, { url: 'apex://newtab', title: 'Новая вкладка', favicon: '' });
+      let nextPins = pinnedTabs;
+      if (tabToClose?.isPinned) {
+        nextPins = pinnedTabs.filter(p => p.tabId !== id && p.url !== tabToClose.url);
+        setPinnedTabs(nextPins);
+      }
+      handleUpdateTab(id, { url: 'apex://newtab', title: 'Новая вкладка', favicon: '', isPinned: false });
+      saveBrowserState({ pinnedTabs: nextPins });
       return;
     }
     const idx = tabs.findIndex(t => t.id === id);
     const remaining = tabs.filter(t => t.id !== id);
+    
+    let nextPins = pinnedTabs;
+    if (tabToClose?.isPinned) {
+      nextPins = pinnedTabs.filter(p => p.tabId !== id && p.url !== tabToClose.url);
+      setPinnedTabs(nextPins);
+    }
+
     setTabs(remaining);
+    saveBrowserState({ tabs: remaining, pinnedTabs: nextPins });
 
     if (activeTabId === id) {
       const nextTab = remaining[Math.max(0, idx - 1)];
@@ -366,14 +525,66 @@ export default function App() {
   };
 
   const handleTogglePinTab = (tab) => {
-    const isPinned = pinnedTabs.some(p => p.url === tab.url);
-    if (isPinned) {
-      setPinnedTabs(prev => prev.filter(p => p.url !== tab.url));
+    const isCurrentlyPinned = pinnedTabs.some(p => p.url === tab.url || p.tabId === tab.id) || !!tab.isPinned;
+    if (isCurrentlyPinned) {
+      const nextPins = pinnedTabs.filter(p => p.url !== tab.url && p.tabId !== tab.id);
+      const nextTabs = tabs.map(t => (t.id === tab.id || t.url === tab.url) ? { ...t, isPinned: false } : t);
+      setPinnedTabs(nextPins);
+      setTabs(nextTabs);
+      saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
       showToast('Вкладка откреплена');
     } else {
-      const newPin = { id: 'pin_' + Date.now(), title: tab.title || 'Закладка', url: tab.url, favicon: tab.favicon };
-      setPinnedTabs(prev => [...prev, newPin]);
-      showToast('📌 Вкладка закреплена в доке');
+      const newPin = {
+        id: 'pin_' + Date.now(),
+        tabId: tab.id,
+        title: tab.title || 'Закрепленная вкладка',
+        url: tab.url,
+        favicon: tab.favicon || '',
+        spaceId: tab.spaceId || activeSpaceId
+      };
+      const nextPins = [...pinnedTabs.filter(p => p.url !== tab.url && p.tabId !== tab.id), newPin];
+      const nextTabs = tabs.map(t => t.id === tab.id ? { ...t, isPinned: true } : t);
+      setPinnedTabs(nextPins);
+      setTabs(nextTabs);
+      saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
+      showToast('📌 Вкладка закреплена');
+    }
+  };
+
+  const handleUnpinTab = (pin) => {
+    const nextPins = pinnedTabs.filter(p => p.id !== pin.id && p.url !== pin.url && p.tabId !== pin.tabId);
+    const nextTabs = tabs.map(t => (t.url === pin.url || t.id === pin.tabId) ? { ...t, isPinned: false } : t);
+    setPinnedTabs(nextPins);
+    setTabs(nextTabs);
+    saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
+    showToast('Вкладка откреплена');
+  };
+
+  const handleSelectPinnedTab = (pin) => {
+    const existing = tabs.find(t => t.id === pin.tabId || t.url === pin.url);
+    if (existing) {
+      if (existing.spaceId && existing.spaceId !== activeSpaceId) {
+        setActiveSpaceId(existing.spaceId);
+      }
+      handleSelectTab(existing.id);
+    } else {
+      const newId = pin.tabId || ('tab_pin_' + Date.now());
+      const newTab = {
+        id: newId,
+        spaceId: pin.spaceId || activeSpaceId,
+        title: pin.title || 'Закрепленная вкладка',
+        url: pin.url,
+        favicon: pin.favicon || '',
+        isLoading: false,
+        canGoBack: false,
+        canGoForward: false,
+        isPlayingAudio: false,
+        isSleeping: false,
+        isPinned: true
+      };
+      setTabs(prev => [newTab, ...prev]);
+      setActiveTabId(newId);
+      saveBrowserState({ tabs: [newTab, ...tabs] });
     }
   };
 
@@ -740,6 +951,18 @@ export default function App() {
     setAdblockStats(st);
   };
 
+  // Window close handler with guaranteed state persistence
+  const handleCloseWindow = async () => {
+    try {
+      if (window.api?.state?.save) {
+        await saveBrowserState();
+      }
+    } catch (e) {
+      console.error('Error saving state on window close:', e);
+    }
+    window.api?.close();
+  };
+
   return (
     <div className="flex flex-col h-screen w-screen bg-slate-950 text-slate-100 overflow-hidden font-sans">
       {/* 1. Top Navigation & Omnibox Bar */}
@@ -764,7 +987,7 @@ export default function App() {
         isMaximized={isMaximized}
         onMinimize={() => window.api?.minimize()}
         onMaximize={() => window.api?.maximize()}
-        onClose={() => window.api?.close()}
+        onClose={handleCloseWindow}
         adblockStats={adblockStats}
         onToggleAdblock={handleToggleAdblock}
         isBookmarked={isBookmarked}
@@ -795,7 +1018,9 @@ export default function App() {
           onCloseTab={handleCloseTab}
           onNewTab={() => handleNewTab()}
           pinnedTabs={pinnedTabs}
-          onSelectPinnedTab={(pin) => handleNewTab(pin.url)}
+          onSelectPinnedTab={handleSelectPinnedTab}
+          onUnpinTab={handleUnpinTab}
+          onTogglePinTab={handleTogglePinTab}
           activeProfile={activeProfile}
           onOpenProfiles={() => setIsProfileModalOpen(true)}
           onOpenSettings={() => setIsSettingsOpen(true)}

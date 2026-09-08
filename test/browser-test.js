@@ -245,24 +245,7 @@ getSearchSuggestions('electron browser').then(sugs => {
       assert(ffBmRes.success === true, 'Firefox bookmarks import should succeed');
       console.log(`  ✓ Successfully imported ${ffBmRes.count} bookmarks from Firefox places.sqlite!`);
 
-      // 7. Test GitHub Auto-Updater
-      console.log('\n[Test 9] Testing GitHub Auto-Updater Engine...');
-      const GitHubUpdater = require('../main/github-updater');
-      const updater = new GitHubUpdater({ currentVersion: '1.0.0' });
-      assert(updater.isNewer('1.0.0', '1.0.1') === true, '1.0.1 should be newer than 1.0.0');
-      assert(updater.isNewer('1.0.1', '1.0.0') === false, '1.0.0 should not be newer than 1.0.1');
-      assert(updater.isNewer('1.0.0', '2.0.0') === true, '2.0.0 should be newer than 1.0.0');
-      console.log('  ✓ Verified semver version comparison logic');
-
-      // Cleanup temp dir
-      if (fs.existsSync(testStorageDir)) {
-        fs.rmSync(testStorageDir, { recursive: true, force: true });
-      }
-
-      console.log('\n==========================================');
-      console.log('🎉 ALL INTEGRATION TESTS PASSED 100%!');
-      console.log('==========================================');
-      process.exit(0);
+      finishTests();
     }).catch(err => {
       console.error('Firefox test error:', err);
       process.exit(1);
@@ -270,15 +253,79 @@ getSearchSuggestions('electron browser').then(sugs => {
     return;
   }
 
-  // Cleanup temp dir
-  if (fs.existsSync(testStorageDir)) {
-    fs.rmSync(testStorageDir, { recursive: true, force: true });
-  }
+  finishTests();
 
-  console.log('\n==========================================');
-  console.log('🎉 ALL INTEGRATION TESTS PASSED 100%!');
-  console.log('==========================================');
-  process.exit(0);
+  function finishTests() {
+    // 7. Test GitHub Auto-Updater
+    console.log('\n[Test 9] Testing GitHub Auto-Updater Engine...');
+    const GitHubUpdater = require('../main/github-updater');
+    const updater = new GitHubUpdater({ currentVersion: '1.0.0' });
+    assert(updater.isNewer('1.0.0', '1.0.1') === true, '1.0.1 should be newer than 1.0.0');
+    assert(updater.isNewer('1.0.1', '1.0.0') === false, '1.0.0 should not be newer than 1.0.1');
+    assert(updater.isNewer('1.0.0', '2.0.0') === true, '2.0.0 should be newer than 1.0.0');
+    console.log('  ✓ Verified semver version comparison logic');
+
+    // 8. Test Pinned Tabs Persistence Across Browser Restarts
+    console.log('\n[Test 10] Testing Pinned Tabs & Browser State Persistence Across Restarts...');
+    const initialTabsState = [
+      { id: 'tab_pinned_tw', url: 'https://timeweb.cloud', title: 'TimeWeb Cloud', isPinned: true, spaceId: 'space_general' },
+      { id: 'tab_pinned_gh', url: 'https://github.com', title: 'GitHub', isPinned: true, spaceId: 'space_general' },
+      { id: 'tab_unpinned', url: 'https://news.ycombinator.com', title: 'Hacker News', isPinned: false, spaceId: 'space_general' }
+    ];
+    const initialPinnedDock = [
+      { id: 'pin_tw', tabId: 'tab_pinned_tw', url: 'https://timeweb.cloud', title: 'TimeWeb Cloud' },
+      { id: 'pin_gh', tabId: 'tab_pinned_gh', url: 'https://github.com', title: 'GitHub' }
+    ];
+
+    const saveSuccess = store.saveState({
+      spaces: [{ id: 'space_general', name: 'Общее' }],
+      activeSpaceId: 'space_general',
+      pinnedTabs: initialPinnedDock,
+      tabs: initialTabsState,
+      activeTabId: 'tab_pinned_tw'
+    });
+    assert(saveSuccess === true, 'ProfileStore should save state successfully');
+
+    // Simulate complete browser restart by creating a new ProfileStore instance from disk
+    const restartedStore = new ProfileStore(testStorageDir);
+    const restoredState = restartedStore.getState();
+
+    assert(restoredState.pinnedTabs && restoredState.pinnedTabs.length === 2, 'Should restore 2 pinned tabs in dock');
+    assert(restoredState.pinnedTabs.some(p => p.url === 'https://timeweb.cloud'), 'Pinned dock must contain TimeWeb Cloud');
+    assert(restoredState.tabs && restoredState.tabs.length === 3, 'Should restore tabs array');
+
+    const pinnedInTabs = restoredState.tabs.filter(t => t.isPinned);
+    assert(pinnedInTabs.length === 2, 'Should have exactly 2 pinned tabs');
+    assert(pinnedInTabs.some(t => t.url === 'https://timeweb.cloud'), 'Pinned tabs must preserve TimeWeb Cloud URL across restart');
+    console.log('  ✓ Verified persistent pinned tabs in browser_state.json across simulated browser restart');
+
+    // Simulate unpinning a tab
+    const unpinnedTabs = restoredState.tabs.map(t => t.url === 'https://timeweb.cloud' ? { ...t, isPinned: false } : t);
+    const updatedPinnedDock = restoredState.pinnedTabs.filter(p => p.url !== 'https://timeweb.cloud');
+    restartedStore.saveState({
+      ...restoredState,
+      pinnedTabs: updatedPinnedDock,
+      tabs: unpinnedTabs
+    });
+
+    const secondRestartStore = new ProfileStore(testStorageDir);
+    const secondRestoredState = secondRestartStore.getState();
+    assert(secondRestoredState.pinnedTabs.length === 1, 'Dock should now have 1 pin after unpin');
+    assert(!secondRestoredState.pinnedTabs.some(p => p.url === 'https://timeweb.cloud'), 'TimeWeb should be removed from pinned dock');
+    const secondPinnedInTabs = secondRestoredState.tabs.filter(t => t.isPinned);
+    assert(secondPinnedInTabs.length === 1, 'Tabs array should now have only 1 pinned tab');
+    console.log('  ✓ Verified unpinning synchronization and persistent disk update');
+
+    // Cleanup temp dir
+    if (fs.existsSync(testStorageDir)) {
+      fs.rmSync(testStorageDir, { recursive: true, force: true });
+    }
+
+    console.log('\n==========================================');
+    console.log('🎉 ALL INTEGRATION TESTS PASSED 100%!');
+    console.log('==========================================');
+    process.exit(0);
+  }
 }).catch(err => {
   console.error('Test error:', err);
   process.exit(1);
