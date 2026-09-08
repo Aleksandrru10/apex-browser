@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { 
   Plus, X, Volume2, VolumeX, Moon, Sparkles, Code, BookOpen, 
-  Briefcase, Coffee, Compass, ChevronLeft, ChevronRight, Settings, 
-  Search, Pin, Archive, Layers, ShieldCheck
+  Briefcase, Coffee, Compass, ChevronLeft, ChevronRight, ChevronDown, Settings, 
+  Search, Pin, Archive, Inbox, Layers, ShieldCheck, Folder, FolderPlus, FolderMinus, Trash2
 } from 'lucide-react';
 
 const SPACE_ICONS = {
@@ -25,6 +25,11 @@ export default function Sidebar({
   onCloseTab,
   onNewTab,
   pinnedTabs,
+  pinnedFolders = [],
+  onCreatePinnedFolder,
+  onDeletePinnedFolder,
+  onToggleFolderCollapse,
+  onMovePinToFolder,
   onSelectPinnedTab,
   onUnpinTab,
   onTogglePinTab,
@@ -34,12 +39,21 @@ export default function Sidebar({
   onOpenCommandPalette,
   onSleepInactiveTabs,
   onArchiveTabs,
+  onOpenArchive,
+  archivedTabsCount = 0,
   collapsed,
   onToggleCollapse,
   onTabContextMenu
 }) {
   const [newSpaceName, setNewSpaceName] = useState('');
   const [showAddSpace, setShowAddSpace] = useState(false);
+  const [showAddFolder, setShowAddFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+
+  // Folders and pinned tabs segregation
+  const currentSpaceFolders = pinnedFolders.filter(f => !f.spaceId || f.spaceId === activeSpaceId);
+  const folderIds = new Set(currentSpaceFolders.map(f => f.id));
+  const rootPinnedTabs = pinnedTabs.filter(p => !p.folderId || !folderIds.has(p.folderId));
 
   // Tabs for the currently selected space (pinned tabs first)
   const currentSpaceTabs = tabs.filter(t => t.spaceId === activeSpaceId);
@@ -224,16 +238,70 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* Arc-style Pinned Favorites Dock */}
+      {/* Arc-style Pinned Favorites Dock & Folders */}
       <div className={`p-2 border-b border-slate-800/60 ${collapsed ? 'flex flex-col items-center' : ''}`}>
         {!collapsed && (
-          <div className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1.5 px-1 flex items-center gap-1">
-            <Pin size={11} />
-            <span>Закрепленные</span>
+          <div className="text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1.5 px-1 flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <Pin size={11} />
+              <span>Закрепленные</span>
+            </div>
+            {onCreatePinnedFolder && (
+              <button
+                onClick={() => setShowAddFolder(!showAddFolder)}
+                className="hover:text-indigo-400 text-slate-500 transition-colors flex items-center gap-1 text-[10px] normal-case"
+                title="Создать папку для закрепленных вкладок"
+              >
+                <FolderPlus size={11} />
+                <span>+ Папка</span>
+              </button>
+            )}
           </div>
         )}
+
+        {/* Add Folder Input */}
+        {showAddFolder && !collapsed && (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (newFolderName.trim() && onCreatePinnedFolder) {
+                onCreatePinnedFolder(newFolderName.trim());
+                setNewFolderName('');
+                setShowAddFolder(false);
+              }
+            }}
+            className="mb-2 flex gap-1"
+          >
+            <input
+              type="text"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') setShowAddFolder(false);
+              }}
+              placeholder="Имя новой папки..."
+              className="flex-1 bg-slate-950 text-xs px-2 py-1 rounded-lg border border-slate-700 text-slate-200 outline-none focus:border-indigo-500"
+              autoFocus
+            />
+            <button
+              type="submit"
+              className="bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded-lg text-xs"
+            >
+              ОК
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAddFolder(false)}
+              className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 text-xs"
+            >
+              <X size={12} />
+            </button>
+          </form>
+        )}
+
+        {/* Root Pinned Tabs Dock */}
         <div className={`flex gap-1.5 ${collapsed ? 'flex-col' : 'flex-wrap'}`}>
-          {pinnedTabs.map(pin => {
+          {rootPinnedTabs.map(pin => {
             const isPinActive = tabs.some(t => t.id === activeTabId && (t.url === pin.url || (pin.tabId && t.id === pin.tabId)));
             return (
               <div key={pin.id} className="relative group">
@@ -250,7 +318,7 @@ export default function Sidebar({
                     <img src={pin.favicon} alt="" className="w-4 h-4 rounded" onError={(e) => { e.target.style.display = 'none'; }} />
                   ) : (
                     <div className="w-4 h-4 rounded bg-indigo-600/30 flex items-center justify-center text-[9px] text-indigo-300 font-bold">
-                      {pin.title[0]}
+                      {pin.title ? pin.title[0] : '📌'}
                     </div>
                   )}
                 </button>
@@ -270,6 +338,134 @@ export default function Sidebar({
             );
           })}
         </div>
+
+        {/* Pinned Folders */}
+        {!collapsed && currentSpaceFolders.length > 0 && (
+          <div className="mt-2 space-y-1">
+            {currentSpaceFolders.map(folder => {
+              const folderPins = pinnedTabs.filter(p => p.folderId === folder.id);
+              const isCollapsed = !!folder.isCollapsed;
+              return (
+                <div key={folder.id} className="rounded-xl bg-slate-950/40 border border-slate-800/60 overflow-hidden">
+                  {/* Folder Header */}
+                  <div
+                    onClick={() => onToggleFolderCollapse && onToggleFolderCollapse(folder.id)}
+                    className="flex items-center justify-between px-2 py-1.5 hover:bg-slate-800/60 cursor-pointer transition-colors group"
+                  >
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {isCollapsed ? <ChevronRight size={12} className="text-slate-500 shrink-0" /> : <ChevronDown size={12} className="text-slate-500 shrink-0" />}
+                      <Folder size={13} style={{ color: folder.color || '#6366f1' }} className="shrink-0" />
+                      <span className="text-xs font-semibold text-slate-200 truncate">{folder.name}</span>
+                      <span className="text-[10px] text-slate-500 font-mono">({folderPins.length})</span>
+                    </div>
+                    {onDeletePinnedFolder && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Удалить папку «${folder.name}»? Вкладки останутся закрепленными.`)) {
+                            onDeletePinnedFolder(folder.id);
+                          }
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-slate-500 hover:text-rose-400 rounded transition-opacity"
+                        title="Удалить папку"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Folder Pins */}
+                  {!isCollapsed && (
+                    <div className="p-1 pt-0 flex flex-col gap-0.5">
+                      {folderPins.length === 0 ? (
+                        <div className="text-[10px] text-slate-500 italic px-2 py-1">
+                          Пусто (ПКМ по закрепленной вкладке &rarr; Папка)
+                        </div>
+                      ) : (
+                        folderPins.map(pin => {
+                          const isPinActive = tabs.some(t => t.id === activeTabId && (t.url === pin.url || (pin.tabId && t.id === pin.tabId)));
+                          return (
+                            <div
+                              key={pin.id}
+                              onClick={() => onSelectPinnedTab(pin)}
+                              className={`group/pin flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg cursor-pointer transition-colors text-xs ${
+                                isPinActive 
+                                  ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30' 
+                                  : 'text-slate-300 hover:bg-slate-800/60'
+                              }`}
+                              title={`${pin.title} (${pin.url})`}
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                                {pin.favicon ? (
+                                  <img src={pin.favicon} alt="" className="w-3.5 h-3.5 rounded shrink-0" onError={(e) => { e.target.style.display = 'none'; }} />
+                                ) : (
+                                  <div className="w-3.5 h-3.5 rounded bg-indigo-600/30 flex items-center justify-center text-[8px] text-indigo-300 font-bold shrink-0">
+                                    {pin.title ? pin.title[0] : '📌'}
+                                  </div>
+                                )}
+                                <span className="truncate text-[11px]">{pin.title || pin.url}</span>
+                              </div>
+                              <div className="opacity-0 group-hover/pin:opacity-100 flex items-center gap-0.5">
+                                {onMovePinToFolder && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onMovePinToFolder(pin.id, null);
+                                    }}
+                                    className="p-0.5 text-slate-400 hover:text-slate-200 rounded"
+                                    title="Убрать из папки"
+                                  >
+                                    <FolderMinus size={11} />
+                                  </button>
+                                )}
+                                {onUnpinTab && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onUnpinTab(pin);
+                                    }}
+                                    className="p-0.5 text-slate-400 hover:text-rose-400 rounded"
+                                    title="Открепить вкладку"
+                                  >
+                                    <X size={11} />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Collapsed Folders icons */}
+        {collapsed && currentSpaceFolders.length > 0 && (
+          <div className="mt-2 flex flex-col gap-1 items-center">
+            {currentSpaceFolders.map(folder => {
+              const folderPins = pinnedTabs.filter(p => p.folderId === folder.id);
+              return (
+                <div 
+                  key={folder.id} 
+                  className="w-8 h-8 rounded-lg bg-slate-800/80 flex items-center justify-center cursor-pointer hover:bg-slate-700 transition-colors relative"
+                  title={`Папка: ${folder.name} (${folderPins.length} вкладок)`}
+                  onClick={onToggleCollapse}
+                >
+                  <Folder size={14} style={{ color: folder.color || '#6366f1' }} />
+                  {folderPins.length > 0 && (
+                    <span className="absolute -bottom-1 -right-1 bg-indigo-600 text-[8px] text-white px-1 rounded-full">
+                      {folderPins.length}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Edge & Arc Vertical Tabs List */}
@@ -292,6 +488,20 @@ export default function Sidebar({
               >
                 <Archive size={12} />
               </button>
+              {onOpenArchive && (
+                <button
+                  onClick={onOpenArchive}
+                  className="hover:text-indigo-300 text-slate-400 transition-colors relative flex items-center"
+                  title="Открыть архив вкладок"
+                >
+                  <Inbox size={13} />
+                  {archivedTabsCount > 0 && (
+                    <span className="absolute -top-1.5 -right-2 bg-indigo-600 text-white text-[9px] font-bold px-1 rounded-full leading-tight">
+                      {archivedTabsCount}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -378,7 +588,7 @@ export default function Sidebar({
                       onCloseTab(tab.id);
                     }}
                     className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-slate-100 transition-colors"
-                    title={tab.isPinned ? "Закрыть и открепить вкладку (Ctrl + W)" : "Закрыть вкладку (Ctrl + W)"}
+                    title={tab.isPinned ? "Закрыть вкладку (остается закрепленной)" : "Закрыть вкладку (Ctrl + W)"}
                   >
                     <X size={12} />
                   </button>

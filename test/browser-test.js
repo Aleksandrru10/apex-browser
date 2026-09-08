@@ -314,7 +314,83 @@ getSearchSuggestions('electron browser').then(sugs => {
     assert(!secondRestoredState.pinnedTabs.some(p => p.url === 'https://timeweb.cloud'), 'TimeWeb should be removed from pinned dock');
     const secondPinnedInTabs = secondRestoredState.tabs.filter(t => t.isPinned);
     assert(secondPinnedInTabs.length === 1, 'Tabs array should now have only 1 pinned tab');
-    console.log('  ✓ Verified unpinning synchronization and persistent disk update');
+    // 9. Test Arc Tab Archive & Pinned Folders Persistence
+    console.log('\n[Test 11] Testing Arc Tab Archive & Pinned Folders with Disk Persistence...');
+    const testArchiveState = {
+      spaces: [{ id: 'space_general', name: 'Общее' }],
+      activeSpaceId: 'space_general',
+      pinnedFolders: [
+        { id: 'folder_work', name: 'Рабочие сервисы', color: '#6366f1', spaceId: 'space_general', isCollapsed: false }
+      ],
+      pinnedTabs: [
+        { id: 'pin_gh', tabId: 'tab_pinned_gh', url: 'https://github.com', title: 'GitHub', folderId: 'folder_work' },
+        { id: 'pin_google', tabId: 'tab_pinned_google', url: 'https://google.com', title: 'Google', folderId: null }
+      ],
+      archivedTabs: [
+        { id: 'arch_1', title: 'Habr Article', url: 'https://habr.com/ru/articles/12345', spaceId: 'space_general', archivedAt: Date.now() - 3600000 },
+        { id: 'arch_2', title: 'Documentation', url: 'https://developer.mozilla.org', spaceId: 'space_general', archivedAt: Date.now() - 7200000 }
+      ],
+      tabs: [
+        { id: 'tab_pinned_gh', url: 'https://github.com', title: 'GitHub', isPinned: true, folderId: 'folder_work', spaceId: 'space_general' },
+        { id: 'tab_pinned_google', url: 'https://google.com', title: 'Google', isPinned: true, folderId: null, spaceId: 'space_general' },
+        { id: 'tab_active', url: 'https://example.com', title: 'Example', isPinned: false, spaceId: 'space_general' }
+      ],
+      activeTabId: 'tab_active'
+    };
+
+    const saveArchiveSuccess = restartedStore.saveState(testArchiveState);
+    assert(saveArchiveSuccess === true, 'State with archive and folders should save successfully');
+
+    // Simulate restart and verify archive & folders restored
+    const archiveStoreRestart = new ProfileStore(testStorageDir);
+    const restoredArchiveState = archiveStoreRestart.getState();
+
+    // 11a. Check Folders
+    assert(restoredArchiveState.pinnedFolders && restoredArchiveState.pinnedFolders.length === 1, 'Pinned folder must be restored');
+    assert(restoredArchiveState.pinnedFolders[0].name === 'Рабочие сервисы', 'Folder name must match');
+    assert(restoredArchiveState.pinnedTabs.some(p => p.folderId === 'folder_work'), 'Pinned tab must remain inside folder');
+    console.log('  ✓ Verified pinned folder and folder-tab relationship persistence across restart');
+
+    // 11b. Check Archive
+    assert(restoredArchiveState.archivedTabs && restoredArchiveState.archivedTabs.length === 2, 'Archived tabs must be restored from disk');
+    assert(restoredArchiveState.archivedTabs.some(a => a.url.includes('habr.com')), 'Habr article must be in archive');
+    console.log(`  ✓ Verified persistent Arc Archive (${restoredArchiveState.archivedTabs.length} tabs) across restart`);
+
+    // 11c. Simulate tab extraction from archive (User clicks «Достать»)
+    const tabToRestore = restoredArchiveState.archivedTabs[0];
+    const nextArchived = restoredArchiveState.archivedTabs.filter(a => a.id !== tabToRestore.id);
+    const nextTabsAfterRestore = [
+      ...restoredArchiveState.tabs,
+      { id: 'tab_restored_1', title: tabToRestore.title, url: tabToRestore.url, spaceId: tabToRestore.spaceId, isPinned: false }
+    ];
+    archiveStoreRestart.saveState({
+      ...restoredArchiveState,
+      archivedTabs: nextArchived,
+      tabs: nextTabsAfterRestore
+    });
+
+    const verifyExtractStore = new ProfileStore(testStorageDir);
+    const stateAfterExtract = verifyExtractStore.getState();
+    assert(stateAfterExtract.archivedTabs.length === 1, 'Archive count should decrease by 1 after extraction');
+    assert(stateAfterExtract.tabs.some(t => t.url === tabToRestore.url), 'Extracted tab must now be present in active tabs');
+    console.log('  ✓ Verified extracting tab from archive back to active workspace');
+
+    // 11d. Simulate closing a pinned tab (Should NOT unpin or delete from pinnedTabs)
+    const pinnedTabToClose = stateAfterExtract.tabs.find(t => t.isPinned && t.url === 'https://github.com');
+    assert(pinnedTabToClose !== undefined, 'Pinned tab exists');
+    // On close of pinned tab: stays in pinnedTabs, stays pinned (sleeping mode)
+    const simulatedTabsAfterClose = stateAfterExtract.tabs.map(t => t.id === pinnedTabToClose.id ? { ...t, isSleeping: true } : t);
+    verifyExtractStore.saveState({
+      ...stateAfterExtract,
+      tabs: simulatedTabsAfterClose
+      // pinnedTabs remains unchanged!
+    });
+
+    const verifyPinnedCloseStore = new ProfileStore(testStorageDir);
+    const stateAfterPinnedClose = verifyPinnedCloseStore.getState();
+    assert(stateAfterPinnedClose.pinnedTabs.some(p => p.url === 'https://github.com'), 'Pinned dock must still contain GitHub after close');
+    assert(stateAfterPinnedClose.tabs.some(t => t.url === 'https://github.com' && t.isPinned), 'Tab must still be marked isPinned after close');
+    console.log('  ✓ Verified pinned tab is NOT unpinned when closed');
 
     // Cleanup temp dir
     if (fs.existsSync(testStorageDir)) {

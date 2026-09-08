@@ -1,7 +1,7 @@
-﻿import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { 
   RotateCw, Copy, Pin, Moon, RefreshCw, SplitSquareVertical, 
-  Volume2, VolumeX, Link, X, Trash2, ArrowDown
+  Volume2, VolumeX, Link, X, Trash2, ArrowDown, Folder, FolderPlus, FolderMinus
 } from 'lucide-react';
 
 export default function TabContextMenu({
@@ -18,7 +18,10 @@ export default function TabContextMenu({
   onCopyUrl,
   onCloseTab,
   onCloseOtherTabs,
-  onCloseTabsBelow
+  onCloseTabsBelow,
+  pinnedFolders = [],
+  onMovePinToFolder,
+  onCreatePinnedFolder
 }) {
   const menuRef = useRef(null);
 
@@ -88,6 +91,48 @@ export default function TabContextMenu({
         <Pin size={13} className="text-slate-400" />
         <span>{tab.isPinned ? 'Открепить вкладку' : 'Закрепить вкладку'}</span>
       </button>
+
+      {tab.isPinned && (
+        <>
+          <div className="h-px bg-slate-800/80 my-1"></div>
+          <div className="px-3 py-1 text-[10px] uppercase font-bold text-slate-500 tracking-wider">Папка для вкладки</div>
+          {tab.folderId && onMovePinToFolder && (
+            <button
+              onClick={() => { onMovePinToFolder(tab.id, null); onClose(); }}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-rose-600/30 text-rose-300 hover:text-rose-100 transition-colors text-left"
+            >
+              <FolderMinus size={13} />
+              <span>Убрать из папки</span>
+            </button>
+          )}
+          {pinnedFolders.map(f => (
+            <button
+              key={f.id}
+              onClick={() => { if (onMovePinToFolder) onMovePinToFolder(tab.id, f.id); onClose(); }}
+              className={`w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-indigo-600 hover:text-white transition-colors text-left ${tab.folderId === f.id ? 'bg-indigo-600/20 text-indigo-300 font-semibold' : ''}`}
+            >
+              <Folder size={13} style={{ color: f.color || '#3b82f6' }} />
+              <span className="truncate flex-1">Папка: {f.name}</span>
+              {tab.folderId === f.id && <span className="text-[10px]">✓</span>}
+            </button>
+          ))}
+          {onCreatePinnedFolder && (
+            <button
+              onClick={() => {
+                const name = prompt('Введите название папки:');
+                if (name && name.trim()) {
+                  onCreatePinnedFolder(name.trim(), tab.id);
+                }
+                onClose();
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-indigo-600 hover:text-white transition-colors text-left text-indigo-400 hover:text-white"
+            >
+              <FolderPlus size={13} />
+              <span>+ Создать папку...</span>
+            </button>
+          )}
+        </>
+      )}
 
       <div className="h-px bg-slate-800/80 my-1"></div>
 

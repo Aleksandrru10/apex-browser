@@ -14,6 +14,7 @@ import TabContextMenu from './components/TabContextMenu';
 import Toast from './components/Toast';
 import PasswordModal from './components/PasswordModal';
 import BrowserImportModal from './components/BrowserImportModal';
+import ArchiveModal from './components/ArchiveModal';
 import { Key, Check, X } from 'lucide-react';
 
 export default function App() {
@@ -49,12 +50,17 @@ export default function App() {
   const [splitScreen, setSplitScreen] = useState(false);
   const [splitTabId, setSplitTabId] = useState(null);
 
-  // Pinned Favorites
+  // Pinned Favorites & Pinned Folders
   const [pinnedTabs, setPinnedTabs] = useState([
-    { id: 'pin_google', title: 'Google', url: 'https://www.google.com', favicon: 'https://www.google.com/favicon.ico' },
-    { id: 'pin_github', title: 'GitHub', url: 'https://github.com', favicon: 'https://github.githubassets.com/favicons/favicon.svg' },
-    { id: 'pin_yt', title: 'YouTube', url: 'https://www.youtube.com', favicon: 'https://www.youtube.com/s/desktop/favicon.ico' }
+    { id: 'pin_google', title: 'Google', url: 'https://www.google.com', favicon: 'https://www.google.com/favicon.ico', folderId: null },
+    { id: 'pin_github', title: 'GitHub', url: 'https://github.com', favicon: 'https://github.githubassets.com/favicons/favicon.svg', folderId: null },
+    { id: 'pin_yt', title: 'YouTube', url: 'https://www.youtube.com', favicon: 'https://www.youtube.com/s/desktop/favicon.ico', folderId: null }
   ]);
+  const [pinnedFolders, setPinnedFolders] = useState([]);
+
+  // Arc Auto-Archive & Storage
+  const [archivedTabs, setArchivedTabs] = useState([]);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
 
   // Data collections
   const [bookmarks, setBookmarks] = useState([]);
@@ -155,6 +161,8 @@ export default function App() {
     try {
       const currentTabs = customOverrides.tabs || tabs;
       const currentPinned = customOverrides.pinnedTabs || pinnedTabs;
+      const currentPinnedFolders = customOverrides.pinnedFolders || pinnedFolders;
+      const currentArchivedTabs = customOverrides.archivedTabs || archivedTabs;
       const currentSpaces = customOverrides.spaces || spaces;
       const currentActiveSpaceId = customOverrides.activeSpaceId || activeSpaceId;
       const currentActiveTabId = customOverrides.activeTabId || activeTabId;
@@ -163,14 +171,20 @@ export default function App() {
       const stateToSave = {
         spaces: currentSpaces,
         activeSpaceId: currentActiveSpaceId,
-        pinnedTabs: currentPinned,
+        pinnedFolders: currentPinnedFolders,
+        archivedTabs: currentArchivedTabs,
+        pinnedTabs: currentPinned.map(p => ({
+          ...p,
+          folderId: p.folderId || null
+        })),
         tabs: currentTabs.map(t => ({
           id: t.id,
           spaceId: t.spaceId,
           title: t.title,
           url: t.url,
           favicon: t.favicon,
-          isPinned: !!t.isPinned
+          isPinned: !!t.isPinned,
+          folderId: t.folderId || null
         })),
         activeTabId: currentActiveTabId,
         settings: currentSettings
@@ -179,16 +193,16 @@ export default function App() {
     } catch (err) {
       console.error('Failed to save browser state:', err);
     }
-  }, [tabs, pinnedTabs, spaces, activeSpaceId, activeTabId, settings]);
+  }, [tabs, pinnedTabs, pinnedFolders, archivedTabs, spaces, activeSpaceId, activeTabId, settings]);
 
-  // Auto-save state when tabs, pinnedTabs, spaces, or activeSpaceId change (debounced)
+  // Auto-save state when tabs, pinnedTabs, pinnedFolders, archivedTabs, spaces, or activeSpaceId change (debounced)
   useEffect(() => {
     if (!isStateLoaded.current) return;
     const timer = setTimeout(() => {
       saveBrowserState();
     }, 500);
     return () => clearTimeout(timer);
-  }, [tabs, pinnedTabs, spaces, activeSpaceId, settings, saveBrowserState]);
+  }, [tabs, pinnedTabs, pinnedFolders, archivedTabs, spaces, activeSpaceId, settings, saveBrowserState]);
 
   // Window beforeunload save
   useEffect(() => {
@@ -232,8 +246,13 @@ export default function App() {
         if (savedState.spaces) setSpaces(savedState.spaces);
         if (savedState.activeSpaceId) setActiveSpaceId(savedState.activeSpaceId);
         if (savedState.settings) setSettings(prev => ({ ...prev, ...savedState.settings }));
+        if (savedState.pinnedFolders) setPinnedFolders(savedState.pinnedFolders);
+        if (savedState.archivedTabs) setArchivedTabs(savedState.archivedTabs);
 
-        const rawPinned = savedState.pinnedTabs || [];
+        const rawPinned = (savedState.pinnedTabs || []).map(p => ({
+          ...p,
+          folderId: p.folderId || null
+        }));
         setPinnedTabs(rawPinned);
 
         // Restore pinned tabs into tabs list
@@ -250,7 +269,8 @@ export default function App() {
               title: p.title || 'Закрепленная вкладка',
               url: p.url,
               favicon: p.favicon || '',
-              isPinned: true
+              isPinned: true,
+              folderId: p.folderId || null
             });
           }
         });
@@ -267,7 +287,8 @@ export default function App() {
             canGoForward: false,
             isPlayingAudio: false,
             isSleeping: false,
-            isPinned: true
+            isPinned: true,
+            folderId: pt.folderId || null
           }));
 
           // Also check for unpinned saved tabs (excluding blank apex://newtab)
@@ -284,7 +305,8 @@ export default function App() {
               canGoForward: false,
               isPlayingAudio: false,
               isSleeping: false,
-              isPinned: false
+              isPinned: false,
+              folderId: null
             }));
 
           const combinedTabs = [...restoredPinnedTabs, ...unpinnedSavedTabs];
@@ -453,27 +475,38 @@ export default function App() {
 
   const handleCloseTab = (id) => {
     const tabToClose = tabs.find(t => t.id === id);
-    if (tabs.length === 1) {
-      let nextPins = pinnedTabs;
-      if (tabToClose?.isPinned) {
-        nextPins = pinnedTabs.filter(p => p.tabId !== id && p.url !== tabToClose.url);
-        setPinnedTabs(nextPins);
+    if (!tabToClose) return;
+
+    // Pinned Tab Handling: NEVER unpin or delete from pinnedTabs on close!
+    if (tabToClose.isPinned) {
+      if (tabs.length === 1) {
+        setTabs(prev => prev.map(t => t.id === id ? { ...t, isSleeping: true } : t));
+        showToast('💤 Закрепленная вкладка усыплена (закрепление сохранено)');
+        return;
       }
+
+      if (activeTabId === id) {
+        const remaining = tabs.filter(t => t.id !== id);
+        const idx = tabs.findIndex(t => t.id === id);
+        const nextTab = remaining[Math.max(0, idx - 1)] || remaining[0];
+        if (nextTab) setActiveTabId(nextTab.id);
+      }
+
+      // Put to sleep (unloads webview from memory), keeping pinned in sidebar & folders
+      setTabs(prev => prev.map(t => t.id === id ? { ...t, isSleeping: true } : t));
+      showToast('💤 Закрепленная вкладка закрыта (закрепление сохранено)');
+      return;
+    }
+
+    if (tabs.length === 1) {
       handleUpdateTab(id, { url: 'apex://newtab', title: 'Новая вкладка', favicon: '', isPinned: false });
-      saveBrowserState({ pinnedTabs: nextPins });
       return;
     }
     const idx = tabs.findIndex(t => t.id === id);
     const remaining = tabs.filter(t => t.id !== id);
-    
-    let nextPins = pinnedTabs;
-    if (tabToClose?.isPinned) {
-      nextPins = pinnedTabs.filter(p => p.tabId !== id && p.url !== tabToClose.url);
-      setPinnedTabs(nextPins);
-    }
 
     setTabs(remaining);
-    saveBrowserState({ tabs: remaining, pinnedTabs: nextPins });
+    saveBrowserState({ tabs: remaining });
 
     if (activeTabId === id) {
       const nextTab = remaining[Math.max(0, idx - 1)];
@@ -528,7 +561,7 @@ export default function App() {
     const isCurrentlyPinned = pinnedTabs.some(p => p.url === tab.url || p.tabId === tab.id) || !!tab.isPinned;
     if (isCurrentlyPinned) {
       const nextPins = pinnedTabs.filter(p => p.url !== tab.url && p.tabId !== tab.id);
-      const nextTabs = tabs.map(t => (t.id === tab.id || t.url === tab.url) ? { ...t, isPinned: false } : t);
+      const nextTabs = tabs.map(t => (t.id === tab.id || t.url === tab.url) ? { ...t, isPinned: false, folderId: null } : t);
       setPinnedTabs(nextPins);
       setTabs(nextTabs);
       saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
@@ -540,7 +573,8 @@ export default function App() {
         title: tab.title || 'Закрепленная вкладка',
         url: tab.url,
         favicon: tab.favicon || '',
-        spaceId: tab.spaceId || activeSpaceId
+        spaceId: tab.spaceId || activeSpaceId,
+        folderId: tab.folderId || null
       };
       const nextPins = [...pinnedTabs.filter(p => p.url !== tab.url && p.tabId !== tab.id), newPin];
       const nextTabs = tabs.map(t => t.id === tab.id ? { ...t, isPinned: true } : t);
@@ -553,7 +587,7 @@ export default function App() {
 
   const handleUnpinTab = (pin) => {
     const nextPins = pinnedTabs.filter(p => p.id !== pin.id && p.url !== pin.url && p.tabId !== pin.tabId);
-    const nextTabs = tabs.map(t => (t.url === pin.url || t.id === pin.tabId) ? { ...t, isPinned: false } : t);
+    const nextTabs = tabs.map(t => (t.url === pin.url || t.id === pin.tabId) ? { ...t, isPinned: false, folderId: null } : t);
     setPinnedTabs(nextPins);
     setTabs(nextTabs);
     saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
@@ -580,7 +614,8 @@ export default function App() {
         canGoForward: false,
         isPlayingAudio: false,
         isSleeping: false,
-        isPinned: true
+        isPinned: true,
+        folderId: pin.folderId || null
       };
       setTabs(prev => [newTab, ...prev]);
       setActiveTabId(newId);
@@ -637,12 +672,160 @@ export default function App() {
     }
   };
 
-  // Arc Auto-Archive unpinned tabs
+  // Pinned Folders Management
+  const handleCreatePinnedFolder = (name, tabIdToInclude = null) => {
+    if (!name || !name.trim()) return;
+    const folderColors = ['#6366f1', '#3b82f6', '#ec4899', '#10b981', '#f59e0b', '#8b5cf6'];
+    const color = folderColors[Math.floor(Math.random() * folderColors.length)];
+    const newFolder = {
+      id: 'folder_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+      name: name.trim(),
+      color,
+      spaceId: activeSpaceId,
+      isCollapsed: false
+    };
+    const nextFolders = [...pinnedFolders, newFolder];
+    setPinnedFolders(nextFolders);
+
+    let nextPins = pinnedTabs;
+    let nextTabs = tabs;
+    if (tabIdToInclude) {
+      nextPins = pinnedTabs.map(p => (p.tabId === tabIdToInclude || p.id === tabIdToInclude) ? { ...p, folderId: newFolder.id } : p);
+      nextTabs = tabs.map(t => t.id === tabIdToInclude ? { ...t, folderId: newFolder.id } : t);
+      setPinnedTabs(nextPins);
+      setTabs(nextTabs);
+    }
+    saveBrowserState({ pinnedFolders: nextFolders, pinnedTabs: nextPins, tabs: nextTabs });
+    showToast(`📁 Папка «${name.trim()}» создана`);
+  };
+
+  const handleDeletePinnedFolder = (folderId) => {
+    const nextFolders = pinnedFolders.filter(f => f.id !== folderId);
+    const nextPins = pinnedTabs.map(p => p.folderId === folderId ? { ...p, folderId: null } : p);
+    const nextTabs = tabs.map(t => t.folderId === folderId ? { ...t, folderId: null } : t);
+    setPinnedFolders(nextFolders);
+    setPinnedTabs(nextPins);
+    setTabs(nextTabs);
+    saveBrowserState({ pinnedFolders: nextFolders, pinnedTabs: nextPins, tabs: nextTabs });
+    showToast('Папка удалена (вкладки остались закрепленными)');
+  };
+
+  const handleToggleFolderCollapse = (folderId) => {
+    setPinnedFolders(prev => {
+      const next = prev.map(f => f.id === folderId ? { ...f, isCollapsed: !f.isCollapsed } : f);
+      saveBrowserState({ pinnedFolders: next });
+      return next;
+    });
+  };
+
+  const handleMovePinToFolder = (tabOrPinId, folderId) => {
+    const nextPins = pinnedTabs.map(p => (p.id === tabOrPinId || p.tabId === tabOrPinId) ? { ...p, folderId } : p);
+    const nextTabs = tabs.map(t => (t.id === tabOrPinId) ? { ...t, folderId } : t);
+    setPinnedTabs(nextPins);
+    setTabs(nextTabs);
+    saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
+    showToast(folderId ? 'Вкладка перемещена в папку' : 'Вкладка убрана из папки');
+  };
+
+  // Arc Auto-Archive unpinned tabs with persistent storage & restoration
   const handleArchiveTabs = () => {
-    const currentTabs = tabs.filter(t => t.spaceId === activeSpaceId);
-    if (currentTabs.length <= 1) return;
-    const keepTab = currentTabs.find(t => t.id === activeTabId) || currentTabs[0];
-    setTabs(prev => prev.filter(t => t.spaceId !== activeSpaceId || t.id === keepTab.id));
+    const candidateTabs = tabs.filter(t => t.spaceId === activeSpaceId && !t.isPinned && t.id !== activeTabId && t.url !== 'apex://newtab');
+    if (candidateTabs.length === 0) {
+      showToast('Нет подходящих неактивных вкладок для архивации');
+      return;
+    }
+    const now = Date.now();
+    const newArchived = candidateTabs.map(t => ({
+      id: 'archived_' + now + '_' + Math.random().toString(36).substring(2, 6),
+      title: t.title || t.url,
+      url: t.url,
+      favicon: t.favicon || '',
+      spaceId: t.spaceId || activeSpaceId,
+      archivedAt: now
+    }));
+    const candidateIds = new Set(candidateTabs.map(t => t.id));
+    const remainingTabs = tabs.filter(t => !candidateIds.has(t.id));
+
+    const nextArchived = [...newArchived, ...archivedTabs];
+    setArchivedTabs(nextArchived);
+    setTabs(remainingTabs);
+    saveBrowserState({ tabs: remainingTabs, archivedTabs: nextArchived });
+    showToast(`📦 В архив перемещено вкладок: ${candidateTabs.length}. Вы можете достать их в любой момент!`);
+  };
+
+  const handleRestoreArchivedTab = (archivedItem) => {
+    const nextArchived = archivedTabs.filter(a => a.id !== archivedItem.id);
+    setArchivedTabs(nextArchived);
+
+    const newId = 'tab_restored_' + Date.now();
+    const restoredTab = {
+      id: newId,
+      spaceId: archivedItem.spaceId || activeSpaceId,
+      title: archivedItem.title || archivedItem.url,
+      url: archivedItem.url,
+      favicon: archivedItem.favicon || '',
+      isLoading: false,
+      canGoBack: false,
+      canGoForward: false,
+      isPlayingAudio: false,
+      isSleeping: false,
+      isPinned: false,
+      folderId: null
+    };
+    const nextTabs = [...tabs, restoredTab];
+    setTabs(nextTabs);
+    if (archivedItem.spaceId && archivedItem.spaceId !== activeSpaceId) {
+      setActiveSpaceId(archivedItem.spaceId);
+    }
+    setActiveTabId(newId);
+    saveBrowserState({ tabs: nextTabs, archivedTabs: nextArchived });
+    showToast(`Вкладка «${archivedItem.title || archivedItem.url}» восстановлена из архива`);
+  };
+
+  const handleRestoreAllArchived = (spaceFilter) => {
+    const toRestore = spaceFilter === 'all' 
+      ? archivedTabs 
+      : archivedTabs.filter(a => a.spaceId === spaceFilter);
+    if (toRestore.length === 0) return;
+
+    const toRestoreIds = new Set(toRestore.map(a => a.id));
+    const nextArchived = archivedTabs.filter(a => !toRestoreIds.has(a.id));
+    setArchivedTabs(nextArchived);
+
+    const newTabs = toRestore.map(item => ({
+      id: 'tab_restored_' + Math.random().toString(36).substring(2, 8),
+      spaceId: item.spaceId || activeSpaceId,
+      title: item.title || item.url,
+      url: item.url,
+      favicon: item.favicon || '',
+      isLoading: false,
+      canGoBack: false,
+      canGoForward: false,
+      isPlayingAudio: false,
+      isSleeping: false,
+      isPinned: false,
+      folderId: null
+    }));
+    const nextTabs = [...tabs, ...newTabs];
+    setTabs(nextTabs);
+    if (newTabs.length > 0) {
+      setActiveTabId(newTabs[newTabs.length - 1].id);
+    }
+    saveBrowserState({ tabs: nextTabs, archivedTabs: nextArchived });
+    showToast(`Восстановлено ${toRestore.length} вкладок из архива`);
+  };
+
+  const handleDeleteArchivedTab = (id) => {
+    const nextArchived = archivedTabs.filter(a => a.id !== id);
+    setArchivedTabs(nextArchived);
+    saveBrowserState({ archivedTabs: nextArchived });
+    showToast('Вкладка удалена из архива');
+  };
+
+  const handleClearArchive = () => {
+    setArchivedTabs([]);
+    saveBrowserState({ archivedTabs: [] });
+    showToast('Архив вкладок полностью очищен');
   };
 
   // Navigation handlers
@@ -1018,6 +1201,11 @@ export default function App() {
           onCloseTab={handleCloseTab}
           onNewTab={() => handleNewTab()}
           pinnedTabs={pinnedTabs}
+          pinnedFolders={pinnedFolders}
+          onCreatePinnedFolder={handleCreatePinnedFolder}
+          onDeletePinnedFolder={handleDeletePinnedFolder}
+          onToggleFolderCollapse={handleToggleFolderCollapse}
+          onMovePinToFolder={handleMovePinToFolder}
           onSelectPinnedTab={handleSelectPinnedTab}
           onUnpinTab={handleUnpinTab}
           onTogglePinTab={handleTogglePinTab}
@@ -1027,6 +1215,8 @@ export default function App() {
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           onSleepInactiveTabs={handleSleepInactiveTabs}
           onArchiveTabs={handleArchiveTabs}
+          onOpenArchive={() => setIsArchiveOpen(true)}
+          archivedTabsCount={archivedTabs.length}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           onTabContextMenu={handleTabContextMenu}
@@ -1208,6 +1398,22 @@ export default function App() {
         onCloseTab={handleCloseTab}
         onCloseOtherTabs={handleCloseOtherTabs}
         onCloseTabsBelow={handleCloseTabsBelow}
+        pinnedFolders={pinnedFolders}
+        onMovePinToFolder={handleMovePinToFolder}
+        onCreatePinnedFolder={handleCreatePinnedFolder}
+      />
+
+      {/* 9. Arc Archive Modal */}
+      <ArchiveModal
+        isOpen={isArchiveOpen}
+        onClose={() => setIsArchiveOpen(false)}
+        archivedTabs={archivedTabs}
+        spaces={spaces}
+        activeSpaceId={activeSpaceId}
+        onRestoreTab={handleRestoreArchivedTab}
+        onRestoreAll={handleRestoreAllArchived}
+        onDeleteArchivedTab={handleDeleteArchivedTab}
+        onClearArchive={handleClearArchive}
       />
 
       {/* 9. Visual Toast Notification */}
