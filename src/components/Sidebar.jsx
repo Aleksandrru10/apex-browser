@@ -30,6 +30,7 @@ export default function Sidebar({
   onDeletePinnedFolder,
   onToggleFolderCollapse,
   onMovePinToFolder,
+  onMoveTabToFolder,
   onSelectPinnedTab,
   onUnpinTab,
   onTogglePinTab,
@@ -50,16 +51,21 @@ export default function Sidebar({
   const [showAddFolder, setShowAddFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
 
+  // Drag & Drop states
+  const [dragOverFolderId, setDragOverFolderId] = useState(null);
+  const [dragOverPinnedDock, setDragOverPinnedDock] = useState(false);
+  const [dragOverTabsArea, setDragOverTabsArea] = useState(false);
+
   // Folders and pinned tabs segregation
   const currentSpaceFolders = pinnedFolders.filter(f => !f.spaceId || f.spaceId === activeSpaceId);
   const folderIds = new Set(currentSpaceFolders.map(f => f.id));
   const rootPinnedTabs = pinnedTabs.filter(p => !p.folderId || !folderIds.has(p.folderId));
 
-  // Tabs for the currently selected space (pinned tabs first)
+  // Tabs for the currently selected space
+  // CRITICAL FIX: The lower "ВКЛАДКИ" list must ONLY contain unpinned tabs that do NOT belong to any folder!
+  // Pinned tabs belong exclusively to the Pinned section (dock or folders) and are not duplicated in the tabs list.
   const currentSpaceTabs = tabs.filter(t => t.spaceId === activeSpaceId);
-  const pinnedSpaceTabs = currentSpaceTabs.filter(t => t.isPinned);
-  const unpinnedSpaceTabs = currentSpaceTabs.filter(t => !t.isPinned);
-  const orderedSpaceTabs = [...pinnedSpaceTabs, ...unpinnedSpaceTabs];
+  const unpinnedSpaceTabs = currentSpaceTabs.filter(t => !t.isPinned && !t.folderId);
   const activeSpace = spaces.find(s => s.id === activeSpaceId) || spaces[0];
 
   const handleCreateSpaceSubmit = (e) => {
@@ -300,11 +306,56 @@ export default function Sidebar({
         )}
 
         {/* Root Pinned Tabs Dock */}
-        <div className={`flex gap-1.5 ${collapsed ? 'flex-col' : 'flex-wrap'}`}>
+        <div 
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            setDragOverPinnedDock(true);
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget)) {
+              setDragOverPinnedDock(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOverPinnedDock(false);
+            try {
+              const raw = e.dataTransfer.getData('text/plain');
+              if (!raw) return;
+              const item = JSON.parse(raw);
+              if (onMoveTabToFolder) {
+                onMoveTabToFolder(item, null);
+              }
+            } catch (err) {
+              console.error('Dock drop error:', err);
+            }
+          }}
+          className={`flex gap-1.5 p-1 rounded-xl transition-all ${
+            collapsed ? 'flex-col' : 'flex-wrap'
+          } ${dragOverPinnedDock ? 'bg-indigo-950/70 border-2 border-dashed border-indigo-400 ring-2 ring-indigo-500/40' : ''}`}
+        >
           {rootPinnedTabs.map(pin => {
             const isPinActive = tabs.some(t => t.id === activeTabId && (t.url === pin.url || (pin.tabId && t.id === pin.tabId)));
+            const openTab = tabs.find(t => (pin.tabId && t.id === pin.tabId) || t.url === pin.url);
             return (
-              <div key={pin.id} className="relative group">
+              <div 
+                key={pin.id} 
+                className="relative group cursor-grab active:cursor-grabbing"
+                draggable={true}
+                onDragStart={(e) => {
+                  e.dataTransfer.setData('text/plain', JSON.stringify({
+                    id: pin.id,
+                    tabId: pin.tabId,
+                    url: pin.url,
+                    title: pin.title,
+                    favicon: pin.favicon,
+                    folderId: null,
+                    isPinned: true
+                  }));
+                  e.dataTransfer.effectAllowed = 'move';
+                }}
+              >
                 <button
                   onClick={() => onSelectPinnedTab(pin)}
                   className={`p-1.5 rounded-xl transition-all flex items-center justify-center border ${
@@ -322,7 +373,18 @@ export default function Sidebar({
                     </div>
                   )}
                 </button>
-                {onUnpinTab && (
+                {openTab ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onCloseTab(openTab.id);
+                    }}
+                    className="absolute -top-1 -right-1 opacity-0 group-hover:opacity-100 p-0.5 bg-slate-800 hover:bg-rose-600 text-slate-400 hover:text-white rounded-full transition-opacity shadow z-10"
+                    title="Закрыть вкладку (остается закрепленной)"
+                  >
+                    <X size={9} />
+                  </button>
+                ) : onUnpinTab ? (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -333,7 +395,7 @@ export default function Sidebar({
                   >
                     <X size={9} />
                   </button>
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -345,8 +407,36 @@ export default function Sidebar({
             {currentSpaceFolders.map(folder => {
               const folderPins = pinnedTabs.filter(p => p.folderId === folder.id);
               const isCollapsed = !!folder.isCollapsed;
+              const isDragTarget = dragOverFolderId === folder.id;
               return (
-                <div key={folder.id} className="rounded-xl bg-slate-950/40 border border-slate-800/60 overflow-hidden">
+                <div 
+                  key={folder.id} 
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (dragOverFolderId !== folder.id) setDragOverFolderId(folder.id);
+                  }}
+                  onDragLeave={(e) => {
+                    if (!e.currentTarget.contains(e.relatedTarget)) setDragOverFolderId(null);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOverFolderId(null);
+                    try {
+                      const raw = e.dataTransfer.getData('text/plain');
+                      if (!raw) return;
+                      const item = JSON.parse(raw);
+                      if (onMoveTabToFolder) onMoveTabToFolder(item, folder.id);
+                    } catch (err) {
+                      console.error('Folder drop error:', err);
+                    }
+                  }}
+                  className={`rounded-xl overflow-hidden transition-all ${
+                    isDragTarget 
+                      ? 'bg-indigo-950/80 border-2 border-dashed border-indigo-400 shadow-xl shadow-indigo-950/60 ring-2 ring-indigo-500/50 scale-[1.01]' 
+                      : 'bg-slate-950/40 border border-slate-800/60'
+                  }`}
+                >
                   {/* Folder Header */}
                   <div
                     onClick={() => onToggleFolderCollapse && onToggleFolderCollapse(folder.id)}
@@ -374,23 +464,45 @@ export default function Sidebar({
                     )}
                   </div>
 
+                  {/* Drop hint when dragging over folder */}
+                  {isDragTarget && (
+                    <div className="px-2.5 py-1 bg-indigo-600/30 text-indigo-300 text-[10px] font-semibold flex items-center gap-1.5 border-t border-indigo-500/40">
+                      <FolderPlus size={12} />
+                      <span>Переместить в «{folder.name}»</span>
+                    </div>
+                  )}
+
                   {/* Folder Pins */}
                   {!isCollapsed && (
                     <div className="p-1 pt-0 flex flex-col gap-0.5">
                       {folderPins.length === 0 ? (
                         <div className="text-[10px] text-slate-500 italic px-2 py-1">
-                          Пусто (ПКМ по закрепленной вкладке &rarr; Папка)
+                          Перетащите вкладку сюда мышкой
                         </div>
                       ) : (
                         folderPins.map(pin => {
-                          const isPinActive = tabs.some(t => t.id === activeTabId && (t.url === pin.url || (pin.tabId && t.id === pin.tabId)));
+                          const openTab = tabs.find(t => (pin.tabId && t.id === pin.tabId) || t.url === pin.url);
+                          const isPinActive = openTab && openTab.id === activeTabId;
                           return (
                             <div
                               key={pin.id}
                               onClick={() => onSelectPinnedTab(pin)}
-                              className={`group/pin flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg cursor-pointer transition-colors text-xs ${
+                              draggable={true}
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData('text/plain', JSON.stringify({
+                                  id: pin.id,
+                                  tabId: pin.tabId,
+                                  url: pin.url,
+                                  title: pin.title,
+                                  favicon: pin.favicon,
+                                  folderId: folder.id,
+                                  isPinned: true
+                                }));
+                                e.dataTransfer.effectAllowed = 'move';
+                              }}
+                              className={`group/pin flex items-center justify-between gap-1.5 px-2 py-1 rounded-lg cursor-grab active:cursor-grabbing transition-colors text-xs ${
                                 isPinActive 
-                                  ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30' 
+                                  ? 'bg-indigo-600/20 text-indigo-200 border border-indigo-500/30 font-medium' 
                                   : 'text-slate-300 hover:bg-slate-800/60'
                               }`}
                               title={`${pin.title} (${pin.url})`}
@@ -406,13 +518,25 @@ export default function Sidebar({
                                 <span className="truncate text-[11px]">{pin.title || pin.url}</span>
                               </div>
                               <div className="opacity-0 group-hover/pin:opacity-100 flex items-center gap-0.5">
+                                {openTab && (
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      onCloseTab(openTab.id);
+                                    }}
+                                    className="p-0.5 text-slate-400 hover:text-rose-400 hover:bg-slate-700/60 rounded"
+                                    title="Закрыть вкладку (остается в папке)"
+                                  >
+                                    <X size={11} />
+                                  </button>
+                                )}
                                 {onMovePinToFolder && (
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       onMovePinToFolder(pin.id, null);
                                     }}
-                                    className="p-0.5 text-slate-400 hover:text-slate-200 rounded"
+                                    className="p-0.5 text-slate-400 hover:text-slate-200 hover:bg-slate-700/60 rounded"
                                     title="Убрать из папки"
                                   >
                                     <FolderMinus size={11} />
@@ -424,10 +548,10 @@ export default function Sidebar({
                                       e.stopPropagation();
                                       onUnpinTab(pin);
                                     }}
-                                    className="p-0.5 text-slate-400 hover:text-rose-400 rounded"
+                                    className="p-0.5 text-slate-400 hover:text-rose-400 hover:bg-slate-700/60 rounded"
                                     title="Открепить вкладку"
                                   >
-                                    <X size={11} />
+                                    <Pin size={11} className="rotate-45" />
                                   </button>
                                 )}
                               </div>
@@ -468,11 +592,39 @@ export default function Sidebar({
         )}
       </div>
 
-      {/* Edge & Arc Vertical Tabs List */}
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      {/* Edge & Arc Vertical Tabs List (Unpinned only) */}
+      <div 
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          setDragOverTabsArea(true);
+        }}
+        onDragLeave={(e) => {
+          if (!e.currentTarget.contains(e.relatedTarget)) {
+            setDragOverTabsArea(false);
+          }
+        }}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOverTabsArea(false);
+          try {
+            const raw = e.dataTransfer.getData('text/plain');
+            if (!raw) return;
+            const item = JSON.parse(raw);
+            if (onUnpinTab) {
+              onUnpinTab(item);
+            }
+          } catch (err) {
+            console.error('Tabs area drop error:', err);
+          }
+        }}
+        className={`flex-1 overflow-y-auto p-2 space-y-1 transition-colors ${
+          dragOverTabsArea ? 'bg-indigo-950/30 ring-1 ring-indigo-500/50' : ''
+        }`}
+      >
         {!collapsed && (
           <div className="flex items-center justify-between text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1 px-1">
-            <span>Вкладки ({currentSpaceTabs.length})</span>
+            <span>Вкладки ({unpinnedSpaceTabs.length})</span>
             <div className="flex items-center gap-1.5">
               <button
                 onClick={onSleepInactiveTabs}
@@ -506,7 +658,13 @@ export default function Sidebar({
           </div>
         )}
 
-        {orderedSpaceTabs.map(tab => {
+        {unpinnedSpaceTabs.length === 0 && !collapsed && (
+          <div className="text-[10px] text-slate-500 italic p-3 text-center bg-slate-950/20 border border-dashed border-slate-800/60 rounded-xl">
+            Нет обычных вкладок
+          </div>
+        )}
+
+        {unpinnedSpaceTabs.map(tab => {
           const isActive = tab.id === activeTabId;
           return (
             <div
@@ -516,7 +674,19 @@ export default function Sidebar({
                 e.preventDefault();
                 if (onTabContextMenu) onTabContextMenu(e, tab);
               }}
-              className={`group relative flex items-center gap-2 p-1.5 rounded-xl cursor-pointer transition-all ${
+              draggable={true}
+              onDragStart={(e) => {
+                e.dataTransfer.setData('text/plain', JSON.stringify({
+                  id: tab.id,
+                  url: tab.url,
+                  title: tab.title,
+                  favicon: tab.favicon,
+                  isPinned: false,
+                  folderId: null
+                }));
+                e.dataTransfer.effectAllowed = 'move';
+              }}
+              className={`group relative flex items-center gap-2 p-1.5 rounded-xl cursor-grab active:cursor-grabbing transition-all ${
                 isActive 
                   ? 'bg-indigo-600/20 border border-indigo-500/40 text-slate-100' 
                   : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 border border-transparent'
@@ -543,20 +713,12 @@ export default function Sidebar({
                     <Volume2 size={8} />
                   </span>
                 )}
-
-                {/* Collapsed mode pinned indicator */}
-                {collapsed && tab.isPinned && (
-                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-indigo-500 rounded-full ring-1 ring-slate-900" title="Закрепленная вкладка" />
-                )}
               </div>
 
               {/* Title (hidden when collapsed) */}
               {!collapsed && (
                 <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                  {tab.isPinned && (
-                    <Pin size={10} className="text-indigo-400 shrink-0" title="Закрепленная вкладка" />
-                  )}
-                  <p className={`text-xs truncate ${tab.isPinned ? 'font-medium text-slate-100' : 'font-normal'}`}>
+                  <p className="text-xs truncate font-normal">
                     {tab.title || 'Новая вкладка'}
                   </p>
                 </div>
@@ -570,16 +732,16 @@ export default function Sidebar({
               {/* Action Buttons on Hover */}
               {!collapsed && (
                 <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 transition-opacity">
-                  {tab.isPinned && onTogglePinTab && (
+                  {onTogglePinTab && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         onTogglePinTab(tab);
                       }}
-                      className="p-1 hover:bg-slate-700 rounded text-indigo-300 hover:text-indigo-100 transition-colors"
-                      title="Открепить вкладку"
+                      className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-slate-100 transition-colors"
+                      title="Закрепить вкладку"
                     >
-                      <Pin size={11} className="rotate-45" />
+                      <Pin size={11} />
                     </button>
                   )}
                   <button
@@ -588,7 +750,7 @@ export default function Sidebar({
                       onCloseTab(tab.id);
                     }}
                     className="p-1 hover:bg-slate-700 rounded text-slate-400 hover:text-slate-100 transition-colors"
-                    title={tab.isPinned ? "Закрыть вкладку (остается закрепленной)" : "Закрыть вкладку (Ctrl + W)"}
+                    title="Закрыть вкладку (Ctrl + W)"
                   >
                     <X size={12} />
                   </button>

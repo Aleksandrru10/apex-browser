@@ -477,31 +477,31 @@ export default function App() {
     const tabToClose = tabs.find(t => t.id === id);
     if (!tabToClose) return;
 
-    // Pinned Tab Handling: NEVER unpin or delete from pinnedTabs on close!
-    if (tabToClose.isPinned) {
-      if (tabs.length === 1) {
-        setTabs(prev => prev.map(t => t.id === id ? { ...t, isSleeping: true } : t));
-        showToast('💤 Закрепленная вкладка усыплена (закрепление сохранено)');
-        return;
-      }
-
-      if (activeTabId === id) {
-        const remaining = tabs.filter(t => t.id !== id);
-        const idx = tabs.findIndex(t => t.id === id);
-        const nextTab = remaining[Math.max(0, idx - 1)] || remaining[0];
-        if (nextTab) setActiveTabId(nextTab.id);
-      }
-
-      // Put to sleep (unloads webview from memory), keeping pinned in sidebar & folders
-      setTabs(prev => prev.map(t => t.id === id ? { ...t, isSleeping: true } : t));
-      showToast('💤 Закрепленная вкладка закрыта (закрепление сохранено)');
-      return;
-    }
-
+    // Pinned Tab Handling:
+    // Closing a pinned tab closes the running tab/webview (not sleeping!),
+    // but leaves the pin permanent in pinnedTabs and in its folder!
     if (tabs.length === 1) {
-      handleUpdateTab(id, { url: 'apex://newtab', title: 'Новая вкладка', favicon: '', isPinned: false });
+      const newId = 'tab_' + Date.now();
+      const newTab = {
+        id: newId,
+        spaceId: activeSpaceId,
+        title: 'Новая вкладка',
+        url: 'apex://newtab',
+        favicon: '',
+        isLoading: false,
+        canGoBack: false,
+        canGoForward: false,
+        isPlayingAudio: false,
+        isSleeping: false,
+        isPinned: false,
+        folderId: null
+      };
+      setTabs([newTab]);
+      setActiveTabId(newId);
+      saveBrowserState({ tabs: [newTab] });
       return;
     }
+
     const idx = tabs.findIndex(t => t.id === id);
     const remaining = tabs.filter(t => t.id !== id);
 
@@ -509,8 +509,8 @@ export default function App() {
     saveBrowserState({ tabs: remaining });
 
     if (activeTabId === id) {
-      const nextTab = remaining[Math.max(0, idx - 1)];
-      setActiveTabId(nextTab.id);
+      const nextTab = remaining[Math.max(0, idx - 1)] || remaining[0];
+      if (nextTab) setActiveTabId(nextTab.id);
     }
 
     if (splitTabId === id) {
@@ -725,6 +725,64 @@ export default function App() {
     setTabs(nextTabs);
     saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs });
     showToast(folderId ? 'Вкладка перемещена в папку' : 'Вкладка убрана из папки');
+  };
+
+  const handleMoveTabToFolder = (item, targetFolderId) => {
+    if (!item) return;
+
+    // Check if this item is already in pinnedTabs
+    const pinIndex = pinnedTabs.findIndex(p =>
+      p.id === item.id || (item.tabId && p.tabId === item.tabId) || (item.url && p.url === item.url)
+    );
+
+    let nextPins = [...pinnedTabs];
+    if (pinIndex !== -1) {
+      nextPins[pinIndex] = {
+        ...nextPins[pinIndex],
+        folderId: targetFolderId
+      };
+    } else {
+      // Unpinned tab: convert to pinned in the target folder
+      const newPin = {
+        id: 'pin_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        tabId: item.id,
+        title: item.title || item.url || 'Закрепленная вкладка',
+        url: item.url,
+        favicon: item.favicon || '',
+        spaceId: activeSpaceId,
+        folderId: targetFolderId
+      };
+      nextPins.push(newPin);
+    }
+
+    // Synchronize tab in tabs array
+    const nextTabs = tabs.map(t => {
+      if (t.id === item.id || (item.tabId && t.id === item.tabId) || (item.url && t.url === item.url)) {
+        return {
+          ...t,
+          isPinned: true,
+          folderId: targetFolderId
+        };
+      }
+      return t;
+    });
+
+    let nextFolders = pinnedFolders;
+    if (targetFolderId) {
+      nextFolders = pinnedFolders.map(f => f.id === targetFolderId ? { ...f, isCollapsed: false } : f);
+      setPinnedFolders(nextFolders);
+    }
+
+    setPinnedTabs(nextPins);
+    setTabs(nextTabs);
+    saveBrowserState({ pinnedTabs: nextPins, tabs: nextTabs, pinnedFolders: nextFolders });
+
+    const targetFolder = pinnedFolders.find(f => f.id === targetFolderId);
+    if (targetFolder) {
+      showToast(`📁 Вкладка перемещена в папку «${targetFolder.name}»`);
+    } else {
+      showToast('📌 Вкладка закреплена в доке');
+    }
   };
 
   // Arc Auto-Archive unpinned tabs with persistent storage & restoration
@@ -1206,6 +1264,7 @@ export default function App() {
           onDeletePinnedFolder={handleDeletePinnedFolder}
           onToggleFolderCollapse={handleToggleFolderCollapse}
           onMovePinToFolder={handleMovePinToFolder}
+          onMoveTabToFolder={handleMoveTabToFolder}
           onSelectPinnedTab={handleSelectPinnedTab}
           onUnpinTab={handleUnpinTab}
           onTogglePinTab={handleTogglePinTab}
