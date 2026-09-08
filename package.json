@@ -1,6 +1,6 @@
 {
   "name": "apex-browser",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Apex Browser - Fusion of Arc, Edge, Firefox, and Chrome with Multi-Profile Isolation",
   "main": "main/index.js",
   "scripts": {
