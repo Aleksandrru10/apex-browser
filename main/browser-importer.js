@@ -24,7 +24,7 @@ class BrowserImporter {
         userDataDir: path.join(local, 'Google', 'Chrome', 'User Data'),
         defaultProfileDir: path.join(local, 'Google', 'Chrome', 'User Data', 'Default'),
         type: 'chromium',
-        passwordUrl: 'chrome://password-manager/settings',
+        passwordUrl: 'https://passwords.google.com/options',
         execName: 'chrome',
         features: {
           oneClickBookmarks: true,
@@ -533,9 +533,10 @@ class BrowserImporter {
 
     try {
       if (process.platform === 'win32') {
-        exec(`cmd /c start ${def.execName} "${def.passwordUrl}"`, (err) => {
+        exec(`cmd /c start "" "${def.execName}" "${def.passwordUrl}"`, (err) => {
           if (err) {
             console.error('Failed to open browser passwords page:', err);
+            exec(`cmd /c start "" "${def.passwordUrl}"`);
           }
         });
       }

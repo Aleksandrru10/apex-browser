@@ -162,11 +162,9 @@ export default function BrowserImportModal({
             return;
           }
 
-          // Otherwise, activate live Auto-Watcher and open settings page
+          // Otherwise, show guided assistant screen (do not unexpectedly pop open Chrome)
           setImportResult(summary);
-          setStage('watcher_active');
-          await window.api.importer.startAutoWatcher();
-          await window.api.importer.openPasswordsPage(selectedBrowserId);
+          setStage('passwords_guide');
           return;
         }
       }
@@ -178,6 +176,20 @@ export default function BrowserImportModal({
       console.error('Import execution error:', e);
       setImportResult(summary);
       setStage('success');
+    }
+  };
+
+  const handleStartExportAndWatcher = async () => {
+    setStage('watcher_active');
+    if (window.api?.importer) {
+      await window.api.importer.startAutoWatcher();
+      await window.api.importer.openPasswordsPage(selectedBrowserId);
+    }
+  };
+
+  const handleReopenExportPage = async () => {
+    if (window.api?.importer) {
+      await window.api.importer.openPasswordsPage(selectedBrowserId);
     }
   };
 
@@ -284,7 +296,95 @@ export default function BrowserImportModal({
 
         {/* Modal Body */}
         <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          {stage === 'watcher_active' ? (
+          {stage === 'passwords_guide' ? (
+            /* Passwords Guide for Chromium (Chrome/Edge) */
+            <div className="py-2 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+              {/* Success note for Bookmarks and History */}
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3.5">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 shadow-inner">
+                  <CheckCircle2 size={24} />
+                </div>
+                <div>
+                  <div className="text-sm font-bold text-slate-100">
+                    Закладки ({importResult?.bookmarksCount || 0}) и история ({importResult?.historyCount || 0}) уже успешно перенесены!
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    Они уже добавлены в ваш профиль Apex Browser.
+                  </div>
+                </div>
+              </div>
+
+              {/* Passwords Assistant Card */}
+              <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-5 space-y-4 shadow-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                    <Key size={22} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-100">
+                      Перенос {selectedBrowser?.passwordCount || 0} паролей из {importResult?.browserName || 'Google Chrome'}
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      Google Chrome v127+ блокирует прямое чтение паролей сторонними приложениями (защита Windows App-Bound Encryption). 
+                      Apex Browser поможет автоматически забрать их в 1 клик через официальный менеджер паролей:
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 bg-slate-900/70 p-4 rounded-xl border border-slate-700/40 text-xs">
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-indigo-600/40 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center shrink-0 text-[11px] mt-0.5">
+                      1
+                    </div>
+                    <div className="text-slate-300">
+                      Нажмите кнопку <strong className="text-white">«Открыть Google Passwords для экспорта»</strong> ниже.
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-indigo-600/40 border border-indigo-500/40 text-indigo-300 font-bold flex items-center justify-center shrink-0 text-[11px] mt-0.5">
+                      2
+                    </div>
+                    <div className="text-slate-300">
+                      В открывшейся вкладке нажмите синюю кнопку <strong className="text-white">«Экспорт паролей» → «Скачать файл»</strong> и введите PIN/пароль Windows.
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 font-bold flex items-center justify-center shrink-0 text-[11px] mt-0.5">
+                      3
+                    </div>
+                    <div className="text-emerald-400 font-medium">
+                      ✨ Apex Browser автоматически перехватит файл при сохранении, добавит все пароли и удалит незашифрованный файл с диска!
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col sm:flex-row items-center gap-2.5">
+                  <button
+                    onClick={handleStartExportAndWatcher}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-600 hover:from-indigo-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-950/50 transition-all"
+                  >
+                    <ExternalLink size={14} />
+                    Открыть Google Passwords для экспорта
+                  </button>
+
+                  <button
+                    onClick={handlePickCsvFile}
+                    className="w-full sm:w-auto px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <Upload size={13} />
+                    Выбрать файл .csv
+                  </button>
+
+                  <button
+                    onClick={() => setStage('success')}
+                    className="w-full sm:w-auto px-4 py-2.5 text-slate-400 hover:text-slate-200 text-xs font-medium transition-colors text-center"
+                  >
+                    Завершить (без паролей)
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : stage === 'watcher_active' ? (
             /* Live Auto-Watcher Assistant View (Chrome/Edge Passwords) */
             <div className="py-2 text-center space-y-5 animate-in fade-in zoom-in-95 duration-200">
               <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
@@ -299,7 +399,7 @@ export default function BrowserImportModal({
                   <span>Ожидание сохранения паролей из {importResult?.browserName || 'Chrome'}...</span>
                 </h3>
                 <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-                  Страница настроек уже открылась в вашем браузере. Выполните 3 простых шага:
+                  Страница Google Passwords открыта. Нажмите кнопку <strong className="text-white">«Экспорт паролей» → «Скачать файл»</strong>.
                 </p>
               </div>
 
@@ -311,10 +411,10 @@ export default function BrowserImportModal({
                   </div>
                   <div>
                     <div className="text-xs font-semibold text-slate-200">
-                      Нажмите синюю кнопку «Экспорт» (Скачать файл)
+                      В браузере нажмите кнопку «Экспорт» (Скачать файл)
                     </div>
                     <div className="text-[11px] text-slate-400">
-                      В открывшемся окне {importResult?.browserName} в разделе «Экспорт паролей»
+                      В открывшейся вкладке Google Passwords в разделе «Экспорт паролей»
                     </div>
                   </div>
                 </div>
@@ -349,13 +449,20 @@ export default function BrowserImportModal({
               </div>
 
               {/* Direct Actions */}
-              <div className="flex items-center justify-center gap-3 pt-2">
+              <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
                 <button
                   onClick={handleManualScanDownloads}
                   className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md shadow-indigo-950/50"
                 >
                   <RefreshCw size={13} />
-                  Проверить Загрузки вручную
+                  Проверить Загрузки сейчас
+                </button>
+                <button
+                  onClick={handleReopenExportPage}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors"
+                >
+                  <ExternalLink size={13} />
+                  Открыть страницу повторно
                 </button>
                 <button
                   onClick={handlePickCsvFile}
@@ -499,7 +606,7 @@ export default function BrowserImportModal({
                               </span>
                             ) : (
                               <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-medium">
-                                1-клик + ассистент
+                                Закладки+история авто
                               </span>
                             )}
                           </div>
@@ -619,7 +726,7 @@ export default function BrowserImportModal({
                     <Zap size={18} />
                   </div>
                   <div className="text-[11px] text-indigo-200">
-                    <span className="font-bold">Умный авто-ассистент:</span> Закладки и история импортируются мгновенно. Для паролей откроется точная страница экспорта, и браузер автоматически перехватит файл сразу после сохранения.
+                    <span className="font-bold">Мгновенно + ассистент:</span> Закладки и история импортируются мгновенно в 1 клик без открытия окон. Для защищенных паролей Chrome откроется официальная страница Google Passwords, а Apex Browser перехватит файл при сохранении.
                   </div>
                 </div>
               )}

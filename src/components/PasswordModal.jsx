@@ -180,7 +180,7 @@ export default function PasswordModal({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] text-slate-300">
               <div className="bg-slate-900/80 p-2.5 rounded-xl border border-indigo-800/40">
                 <div className="font-bold text-indigo-300 mb-1">Google Chrome:</div>
-                Вставьте в строку браузера: <code className="text-amber-300 select-all">chrome://password-manager/settings</code>
+                Откройте в Chrome: <code className="text-amber-300 select-all">https://passwords.google.com/options</code>
                 <br />Нажмите «Экспорт паролей» → Скачать файл (.csv).
               </div>
               <div className="bg-slate-900/80 p-2.5 rounded-xl border border-indigo-800/40">
