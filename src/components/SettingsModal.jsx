@@ -57,7 +57,11 @@ export default function SettingsModal({
   };
 
   const handleDownloadUpdate = async () => {
-    if (!window.api?.updater || !updateInfo?.downloadUrl) return;
+    if (!window.api?.updater) return;
+    if (!updateInfo?.downloadUrl) {
+      alert('Установочный файл v' + (updateInfo?.latestVersion || '1.0.1') + ' сейчас передается на сервер GitHub. Пожалуйста, подождите 1-2 минуты завершения передачи и нажмите «Проверить обновления» еще раз.');
+      return;
+    }
     setUpdateStatus('downloading');
     setDownloadProgress(0);
 
