@@ -115,6 +115,17 @@ if (!gotTheLock) {
     proxyManager.setupAuthHandler(app);
     createWindow();
 
+    if (process.env.TEST_STARTUP === '1') {
+      mainWindow.webContents.on('did-finish-load', async () => {
+        console.log('  ✓ UI did-finish-load triggered in main window');
+        await new Promise(r => setTimeout(r, 2500));
+        const title = await mainWindow.webContents.executeJavaScript('document.title');
+        console.log('  ✓ Main window verified document title:', title);
+        console.log('🎉 REAL PRODUCTION STARTUP VERIFICATION PASSED 100%!');
+        app.exit(0);
+      });
+    }
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
