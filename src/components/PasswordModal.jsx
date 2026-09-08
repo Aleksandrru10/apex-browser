@@ -9,7 +9,8 @@ export default function PasswordModal({
   onClose,
   onAutofillActiveTab,
   activeTabUrl,
-  onOpenImport
+  onOpenImport,
+  initialSearch = ''
 }) {
   const [passwords, setPasswords] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -35,11 +36,12 @@ export default function PasswordModal({
   useEffect(() => {
     if (isOpen) {
       loadPasswords();
+      setSearchQuery(initialSearch || '');
       if (activeTabUrl && !activeTabUrl.startsWith('apex://')) {
         setNewUrl(activeTabUrl);
       }
     }
-  }, [isOpen, activeTabUrl]);
+  }, [isOpen, activeTabUrl, initialSearch]);
 
   if (!isOpen) return null;
 

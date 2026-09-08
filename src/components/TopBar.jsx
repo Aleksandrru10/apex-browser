@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowLeft, ArrowRight, RotateCw, Home, Shield, ShieldAlert, 
   Star, SplitSquareVertical, BookOpen, PanelRight, Minus, Square, 
-  Copy, Check, X, Search, Globe, Lock, ExternalLink, Moon, Sun, Key, FolderDown
+  Copy, Check, X, Search, Globe, Lock, ExternalLink, Moon, Sun, Key, FolderDown, Settings
 } from 'lucide-react';
 
 export default function TopBar({
@@ -35,6 +35,8 @@ export default function TopBar({
   onToggleDarkMode,
   onOpenPasswords,
   savedPasswordsCountForDomain = 0,
+  savedPasswordsForActiveTab = [],
+  onAutofillCredential,
   onQuickAutofill,
   onOpenImport
 }) {
@@ -43,8 +45,34 @@ export default function TopBar({
   const [suggestions, setSuggestions] = useState([]);
   const [copied, setCopied] = useState(false);
   const [showShieldMenu, setShowShieldMenu] = useState(false);
+  const [showPasswordMenu, setShowPasswordMenu] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const shieldRef = useRef(null);
+  const passwordMenuRef = useRef(null);
+
+  // Close password popover on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (passwordMenuRef.current && !passwordMenuRef.current.contains(e.target)) {
+        setShowPasswordMenu(false);
+      }
+    }
+    if (showPasswordMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showPasswordMenu]);
+
+  const getDomain = (rawUrl) => {
+    try {
+      if (!rawUrl || rawUrl.startsWith('apex://')) return '';
+      const u = new URL(rawUrl.startsWith('http') ? rawUrl : 'https://' + rawUrl);
+      return u.hostname.replace(/^www\./, '');
+    } catch (e) {
+      return '';
+    }
+  };
+  const activeDomain = getDomain(activeTab?.url);
 
   useEffect(() => {
     if (!isFocused && activeTab?.url) {
@@ -231,18 +259,113 @@ export default function TopBar({
               <Star size={14} fill={isBookmarked ? "currentColor" : "none"} />
             </button>
 
-            {/* Password Autofill Quick Badge */}
-            {savedPasswordsCountForDomain > 0 && (
-              <button
-                onClick={onQuickAutofill}
-                className="p-1 rounded text-amber-400 hover:text-amber-300 hover:bg-amber-500/20 flex items-center gap-1 transition-colors"
-                title={`Автозаполнить логин и пароль (${savedPasswordsCountForDomain} сохраненных)`}
-              >
-                <Key size={14} />
-                <span className="font-mono text-[9px] bg-amber-500/20 px-1 rounded text-amber-300 font-bold">
-                  {savedPasswordsCountForDomain}
-                </span>
-              </button>
+            {/* Password Autofill Quick Badge with Dropdown Picker */}
+            {savedPasswordsForActiveTab && savedPasswordsForActiveTab.length > 0 && (
+              <div className="relative" ref={passwordMenuRef}>
+                <button
+                  onClick={() => {
+                    if (savedPasswordsForActiveTab.length === 1) {
+                      if (onAutofillCredential) onAutofillCredential(savedPasswordsForActiveTab[0]);
+                      else if (onQuickAutofill) onQuickAutofill();
+                    } else {
+                      setShowPasswordMenu(!showPasswordMenu);
+                    }
+                  }}
+                  className={`p-1 rounded flex items-center gap-1 transition-colors ${
+                    showPasswordMenu 
+                      ? 'text-amber-300 bg-amber-500/20 shadow' 
+                      : 'text-amber-400 hover:text-amber-300 hover:bg-amber-500/20'
+                  }`}
+                  title={
+                    savedPasswordsForActiveTab.length === 1
+                      ? `Автозаполнить логин и пароль (${savedPasswordsForActiveTab[0].username})`
+                      : `Выбрать аккаунт для автозаполнения (${savedPasswordsForActiveTab.length} сохраненных)`
+                  }
+                >
+                  <Key size={14} />
+                  <span className="font-mono text-[9px] bg-amber-500/20 px-1 rounded text-amber-300 font-bold">
+                    {savedPasswordsForActiveTab.length}
+                  </span>
+                </button>
+
+                {/* Account Selection Popover */}
+                {showPasswordMenu && (
+                  <div className="absolute right-0 mt-2 w-80 bg-slate-900 border border-slate-700/90 rounded-2xl shadow-2xl p-3 text-xs z-50 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                          <Key size={13} />
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-200 truncate max-w-[190px]">
+                            {activeDomain || 'Аккаунты для этого сайта'}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {savedPasswordsForActiveTab.length} сохранённых аккаунта
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => setShowPasswordMenu(false)}
+                        className="p-1 text-slate-500 hover:text-slate-300 rounded"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+
+                    <div className="py-2 space-y-1.5 max-h-60 overflow-y-auto">
+                      {savedPasswordsForActiveTab.map((cred, idx) => (
+                        <div
+                          key={cred.id || idx}
+                          onClick={() => {
+                            if (onAutofillCredential) onAutofillCredential(cred);
+                            setShowPasswordMenu(false);
+                          }}
+                          className="group flex items-center justify-between p-2 rounded-xl bg-slate-800/60 hover:bg-indigo-600/20 hover:border-indigo-500/50 border border-slate-700/50 transition-all cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 min-w-0 pr-2">
+                            <div className="w-7 h-7 rounded-lg bg-slate-900 flex items-center justify-center text-amber-300 group-hover:text-indigo-300 shrink-0">
+                              <Key size={12} />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-xs font-semibold text-slate-200 truncate group-hover:text-indigo-200">
+                                {cred.username || '(без логина)'}
+                              </div>
+                              <div className="text-[10px] text-slate-500 font-mono">
+                                ••••••••
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (onAutofillCredential) onAutofillCredential(cred);
+                              setShowPasswordMenu(false);
+                            }}
+                            className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-semibold shrink-0 transition-colors shadow"
+                          >
+                            Вставить
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                      <button
+                        onClick={() => {
+                          setShowPasswordMenu(false);
+                          if (onOpenPasswords) onOpenPasswords(activeDomain);
+                        }}
+                        className="text-slate-400 hover:text-indigo-300 transition-colors flex items-center gap-1 font-medium"
+                      >
+                        <Settings size={12} />
+                        <span>Все пароли в менеджере</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Firefox Reader Mode Button */}

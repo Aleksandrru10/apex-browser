@@ -104,6 +104,7 @@ export default function App() {
   const [peekUrl, setPeekUrl] = useState('');
   const [isMaximized, setIsMaximized] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [passwordModalFilter, setPasswordModalFilter] = useState('');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [savedPasswordsForActiveTab, setSavedPasswordsForActiveTab] = useState([]);
 
@@ -573,26 +574,49 @@ export default function App() {
             const user = ${JSON.stringify(cred.username)};
             const pass = ${JSON.stringify(cred.password)};
 
+            function setNativeValue(element, value) {
+              if (!element) return;
+              element.focus();
+              const valueSetter = Object.getOwnPropertyDescriptor(element, 'value')?.set;
+              const prototype = Object.getPrototypeOf(element);
+              const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+              if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+                prototypeValueSetter.call(element, value);
+              } else if (valueSetter) {
+                valueSetter.call(element, value);
+              } else {
+                element.value = value;
+              }
+              element.dispatchEvent(new Event('input', { bubbles: true }));
+              element.dispatchEvent(new Event('change', { bubbles: true }));
+              element.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true }));
+              element.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true }));
+            }
+
             const passInputs = Array.from(document.querySelectorAll('input[type="password"]'));
             if (passInputs.length > 0) {
               const pInput = passInputs[0];
-              pInput.focus();
-              pInput.value = pass;
-              pInput.dispatchEvent(new Event('input', { bubbles: true }));
-              pInput.dispatchEvent(new Event('change', { bubbles: true }));
+              
+              // Find visible username/email inputs on the page
+              const allInputs = Array.from(document.querySelectorAll('input:not([type="password"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])'));
+              
+              let uInput = allInputs.find(i => {
+                const text = ((i.name || '') + ' ' + (i.id || '') + ' ' + (i.placeholder || '') + ' ' + (i.getAttribute('autocomplete') || '') + ' ' + (i.getAttribute('aria-label') || '')).toLowerCase();
+                return text.includes('user') || text.includes('login') || text.includes('email') || text.includes('mail') || text.includes('логин') || text.includes('емейл') || text.includes('имя');
+              });
 
-              const form = pInput.closest('form') || document;
-              const userInputs = Array.from(form.querySelectorAll('input[type="email"], input[type="text"], input[name*="user"], input[name*="login"], input[name*="email"], input[autocomplete*="user"], input[id*="user"], input[id*="login"], input[id*="email"]')).filter(i => i !== pInput);
-              if (userInputs.length > 0) {
-                const uInput = userInputs[0];
-                uInput.focus();
-                uInput.value = user;
-                uInput.dispatchEvent(new Event('input', { bubbles: true }));
-                uInput.dispatchEvent(new Event('change', { bubbles: true }));
+              if (!uInput && allInputs.length > 0) {
+                uInput = allInputs[0];
               }
+
+              if (user && uInput) {
+                setNativeValue(uInput, user);
+              }
+              setNativeValue(pInput, pass);
+
               return { success: true };
             }
-            return { success: false, reason: 'Поля формы входа не найдены на этой странице' };
+            return { success: false, reason: 'Поле пароля не найдено на этой странице' };
           } catch (e) {
             return { success: false, reason: e.message };
           }
@@ -613,7 +637,12 @@ export default function App() {
   const handleQuickAutofill = () => {
     if (savedPasswordsForActiveTab.length === 1) {
       handleAutofill(savedPasswordsForActiveTab[0]);
+    } else if (savedPasswordsForActiveTab.length > 1) {
+      const domain = activeTab?.url ? new URL(activeTab.url.startsWith('http') ? activeTab.url : 'https://' + activeTab.url).hostname.replace(/^www\./, '') : '';
+      setPasswordModalFilter(domain);
+      setIsPasswordModalOpen(true);
     } else {
+      setPasswordModalFilter('');
       setIsPasswordModalOpen(true);
     }
   };
@@ -695,9 +724,13 @@ export default function App() {
         isBookmarked={isBookmarked}
         onToggleBookmark={handleToggleBookmark}
         isDarkMode={isDarkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-        onOpenPasswords={() => setIsPasswordModalOpen(true)}
+        onOpenPasswords={(filter) => {
+          setPasswordModalFilter(filter || '');
+          setIsPasswordModalOpen(true);
+        }}
         savedPasswordsCountForDomain={savedPasswordsForActiveTab.length}
+        savedPasswordsForActiveTab={savedPasswordsForActiveTab}
+        onAutofillCredential={handleAutofill}
         onQuickAutofill={handleQuickAutofill}
         onOpenImport={() => setIsImportModalOpen(true)}
       />
@@ -913,6 +946,7 @@ export default function App() {
         onClose={() => setIsPasswordModalOpen(false)}
         onAutofillActiveTab={handleAutofill}
         activeTabUrl={activeTab?.url}
+        initialSearch={passwordModalFilter}
         onOpenImport={() => {
           setIsPasswordModalOpen(false);
           setIsImportModalOpen(true);
