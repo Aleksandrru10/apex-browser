@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { Moon, RefreshCw } from 'lucide-react';
 
 export default function WebTab({
@@ -10,7 +10,8 @@ export default function WebTab({
   onWakeTab,
   webviewRefCallback,
   isDarkMode = true,
-  forceDark = false
+  forceDark = false,
+  onPasswordSubmitted
 }) {
   const webviewRef = useRef(null);
 
@@ -37,7 +38,19 @@ export default function WebTab({
     };
 
     const handleTitleUpdated = (e) => {
-      if (e.title) onUpdateTab(tab.id, { title: e.title });
+      if (e.title) {
+        onUpdateTab(tab.id, { title: e.title });
+        if (window.api?.history) {
+          const currentUrl = el.getURL ? el.getURL() : tab.url;
+          if (currentUrl && !currentUrl.startsWith('about:') && !currentUrl.startsWith('chrome:') && !currentUrl.startsWith('apex:')) {
+            window.api.history.add({
+              url: currentUrl,
+              title: e.title,
+              profileId: tab.profileId
+            });
+          }
+        }
+      }
     };
 
     const handleFaviconUpdated = (e) => {
@@ -119,6 +132,90 @@ export default function WebTab({
           }
         }).catch(() => {});
       }
+
+      // Inject credential submission listener
+      injectPasswordWatcher();
+    };
+
+    const injectPasswordWatcher = () => {
+      el.executeJavaScript(`
+        (() => {
+          if (window.__apexPwdWatcherInstalled) return;
+          window.__apexPwdWatcherInstalled = true;
+
+          function detectCredentials() {
+            try {
+              const passInputs = Array.from(document.querySelectorAll('input[type="password"]')).filter(i => i.value && i.value.length > 0);
+              if (passInputs.length === 0) return null;
+
+              const passInput = passInputs[0];
+              const password = passInput.value;
+              if (!password || password.length < 2) return null;
+
+              let username = '';
+              const form = passInput.closest('form');
+              const scope = form || document;
+              const allInputs = Array.from(scope.querySelectorAll('input:not([type="password"]):not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="submit"]):not([type="button"])'));
+
+              for (const inp of allInputs) {
+                const val = (inp.value || '').trim();
+                if (!val) continue;
+                const descriptor = ((inp.name || '') + ' ' + (inp.id || '') + ' ' + (inp.getAttribute('autocomplete') || '') + ' ' + (inp.type || '')).toLowerCase();
+                if (descriptor.includes('user') || descriptor.includes('login') || descriptor.includes('email') || descriptor.includes('phone') || descriptor.includes('account') || inp.type === 'email') {
+                  username = val;
+                  break;
+                } else if (!username) {
+                  username = val;
+                }
+              }
+
+              return {
+                url: window.location.href,
+                hostname: window.location.hostname.replace(/^www\\./, ''),
+                username: username || '',
+                password: password
+              };
+            } catch(e) {
+              return null;
+            }
+          }
+
+          function notify() {
+            const creds = detectCredentials();
+            if (creds && creds.password) {
+              console.log('__APEX_PWD_SUBMIT__:' + JSON.stringify(creds));
+            }
+          }
+
+          document.addEventListener('submit', () => notify(), true);
+          document.addEventListener('click', (e) => {
+            const btn = e.target.closest('button, input[type="submit"], [role="button"], a');
+            if (btn) {
+              const txt = (btn.innerText || btn.value || '').toLowerCase();
+              if (btn.type === 'submit' || txt.includes('войти') || txt.includes('вход') || txt.includes('логин') || txt.includes('login') || txt.includes('sign in') || txt.includes('log in') || txt.includes('next') || txt.includes('далее')) {
+                notify();
+              }
+            }
+          }, true);
+          document.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT') {
+              notify();
+            }
+          }, true);
+        })();
+      `).catch(() => {});
+    };
+
+    const handleConsoleMessage = (e) => {
+      if (e.message && e.message.startsWith('__APEX_PWD_SUBMIT__:')) {
+        try {
+          const jsonStr = e.message.slice('__APEX_PWD_SUBMIT__:'.length);
+          const creds = JSON.parse(jsonStr);
+          if (creds && creds.password && onPasswordSubmitted) {
+            onPasswordSubmitted(creds);
+          }
+        } catch (err) {}
+      }
     };
 
     el.addEventListener('did-start-loading', handleStartLoading);
@@ -131,6 +228,7 @@ export default function WebTab({
     el.addEventListener('media-paused', handleMediaPaused);
     el.addEventListener('new-window', handleNewWindow);
     el.addEventListener('dom-ready', handleDomReady);
+    el.addEventListener('console-message', handleConsoleMessage);
 
     return () => {
       el.removeEventListener('did-start-loading', handleStartLoading);
@@ -143,6 +241,7 @@ export default function WebTab({
       el.removeEventListener('media-paused', handleMediaPaused);
       el.removeEventListener('new-window', handleNewWindow);
       el.removeEventListener('dom-ready', handleDomReady);
+      el.removeEventListener('console-message', handleConsoleMessage);
     };
   }, [tab.id, tab.isSleeping, isDarkMode, forceDark]);
 

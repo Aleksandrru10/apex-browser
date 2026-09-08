@@ -71,6 +71,37 @@ const hist = store.getHistory();
 assert(hist.length > 0 && hist[0].url === 'https://example.com/test');
 console.log(`  ✓ Saved history entry with profile tracking: "${hist[0].url}"`);
 
+// Test searchHistory in Omnibox
+store.addHistory({ url: 'https://timeweb.cloud/dashboard', title: 'Облачный хостинг TimeWeb Cloud', profileId: prof1.id });
+store.addHistory({ url: 'https://github.com/torvalds/linux', title: 'Linux source code repository', profileId: prof1.id });
+
+const timeWebMatches = store.searchHistory('Time Web');
+assert(timeWebMatches.length > 0, 'Should find Time Web by multi-word title');
+assert(timeWebMatches[0].url.includes('timeweb.cloud'), 'Top result should be timeweb.cloud');
+console.log(`  ✓ Verified multi-word history search for "Time Web" -> "${timeWebMatches[0].title}" (${timeWebMatches[0].url})`);
+
+const timewebDomainMatches = store.searchHistory('timeweb');
+assert(timewebDomainMatches.length > 0, 'Should find timeweb by domain');
+console.log(`  ✓ Verified domain history search for "timeweb" -> "${timewebDomainMatches[0].url}"`);
+
+// Test HTML Bookmarks Import (universal browser format)
+const htmlBookmarks = `
+<!DOCTYPE NETSCAPE-Bookmark-file-1>
+<META HTTP-EQUIV="Content-Type" CONTENT="text/html; charset=UTF-8">
+<TITLE>Bookmarks</TITLE>
+<H1>Bookmarks</H1>
+<DL><p>
+    <DT><A HREF="https://habr.com/ru/articles/" ADD_DATE="1600000000">Хабр статьи &amp; новости</A>
+    <DT><A HREF="https://news.ycombinator.com" ADD_DATE="1600000001">Hacker News</A>
+</DL><p>
+`;
+const htmlRes = store.importBookmarksFromHtml(htmlBookmarks);
+assert(htmlRes.success === true && htmlRes.count === 2, 'Should import 2 bookmarks from HTML Netscape format');
+const updatedBookmarks = store.getBookmarks();
+assert(updatedBookmarks.some(b => b.url === 'https://news.ycombinator.com'));
+assert(updatedBookmarks.some(b => b.title.includes('Хабр статьи & новости')));
+console.log(`  ✓ Verified universal HTML Netscape format bookmarks import (${htmlRes.count} bookmarks)`);
+
 // Notes (Easel)
 console.log('\n[Test 3] Testing Quick Notes (Easel / Scratchpad)...');
 store.saveNotes('# Мои исследовательские заметки\n- Пункт 1: Изоляция куки проверена\n- Пункт 2: Скорость Chromium отличная');

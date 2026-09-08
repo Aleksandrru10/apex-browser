@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   ArrowLeft, ArrowRight, RotateCw, Home, Shield, ShieldAlert, 
   Star, SplitSquareVertical, BookOpen, PanelRight, Minus, Square, 
-  Copy, Check, X, Search, Globe, Lock, ExternalLink, Moon, Sun, Key, FolderDown, Settings
+  Copy, Check, X, Search, Globe, Lock, ExternalLink, Moon, Sun, Key, FolderDown, Settings, Clock
 } from 'lucide-react';
 
 export default function TopBar({
@@ -42,7 +42,7 @@ export default function TopBar({
 }) {
   const [urlInput, setUrlInput] = useState(activeTab?.url || '');
   const [isFocused, setIsFocused] = useState(false);
-  const [suggestions, setSuggestions] = useState([]);
+  const [unifiedSuggestions, setUnifiedSuggestions] = useState([]);
   const [copied, setCopied] = useState(false);
   const [showShieldMenu, setShowShieldMenu] = useState(false);
   const [showPasswordMenu, setShowPasswordMenu] = useState(false);
@@ -80,23 +80,72 @@ export default function TopBar({
     }
   }, [activeTab?.url, isFocused]);
 
-  // Fetch search suggestions as user types
+  // Fetch unified suggestions (History + Bookmarks + Google search) as user types
   useEffect(() => {
-    if (!isFocused || !urlInput.trim() || urlInput.startsWith('http')) {
-      setSuggestions([]);
+    if (!isFocused || !urlInput.trim()) {
+      setUnifiedSuggestions([]);
+      setSelectedIndex(-1);
       return;
     }
 
     const timer = setTimeout(async () => {
       try {
-        if (window.api?.search) {
-          const res = await window.api.search.getSuggestions(urlInput, 'google');
-          setSuggestions(res || []);
+        const query = urlInput.trim();
+        const results = [];
+
+        // 1. History search (direct match by visited sites)
+        if (window.api?.history?.search) {
+          const histMatches = await window.api.history.search(query, 5);
+          if (histMatches && histMatches.length > 0) {
+            histMatches.forEach(h => {
+              results.push({
+                type: 'history',
+                title: h.title || h.url,
+                url: h.url
+              });
+            });
+          }
         }
+
+        // 2. Bookmarks search
+        if (window.api?.bookmarks?.getAll) {
+          const allBm = await window.api.bookmarks.getAll();
+          const qLower = query.toLowerCase();
+          const bmMatches = (allBm || []).filter(b => 
+            (b.title && b.title.toLowerCase().includes(qLower)) || 
+            (b.url && b.url.toLowerCase().includes(qLower))
+          ).slice(0, 3);
+
+          bmMatches.forEach(b => {
+            if (!results.some(r => r.url === b.url)) {
+              results.push({
+                type: 'bookmark',
+                title: b.title || b.url,
+                url: b.url
+              });
+            }
+          });
+        }
+
+        // 3. Web Search Suggestions (Google)
+        if (!query.startsWith('http://') && !query.startsWith('https://') && window.api?.search) {
+          const searchSugs = await window.api.search.getSuggestions(query, 'google');
+          if (searchSugs && searchSugs.length > 0) {
+            searchSugs.slice(0, 5).forEach(s => {
+              results.push({
+                type: 'search',
+                query: s
+              });
+            });
+          }
+        }
+
+        setUnifiedSuggestions(results);
+        setSelectedIndex(-1);
       } catch (e) {
-        setSuggestions([]);
+        setUnifiedSuggestions([]);
       }
-    }, 200);
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [urlInput, isFocused]);
@@ -117,38 +166,46 @@ export default function TopBar({
     if (!query) return;
 
     let destination = query;
-    // Check if it looks like a valid URL or domain
     const isDomain = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/.test(query);
     if (query.startsWith('http://') || query.startsWith('https://') || query.startsWith('apex://') || query.startsWith('file://')) {
       destination = query;
     } else if (isDomain) {
       destination = 'https://' + query;
     } else {
-      // Search query
       destination = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
     }
 
     onNavigate(destination);
     setIsFocused(false);
-    setSuggestions([]);
+    setUnifiedSuggestions([]);
+  };
+
+  const handleSelectSuggestion = (item) => {
+    if (item.type === 'history' || item.type === 'bookmark') {
+      onNavigate(item.url);
+    } else if (item.type === 'search') {
+      handleSubmit(item.query);
+    }
+    setIsFocused(false);
+    setUnifiedSuggestions([]);
   };
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
-      if (selectedIndex >= 0 && suggestions[selectedIndex]) {
-        handleSubmit(suggestions[selectedIndex]);
+      if (selectedIndex >= 0 && unifiedSuggestions[selectedIndex]) {
+        handleSelectSuggestion(unifiedSuggestions[selectedIndex]);
       } else {
         handleSubmit();
       }
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelectedIndex((prev) => (prev < suggestions.length - 1 ? prev + 1 : prev));
+      setSelectedIndex((prev) => (prev < unifiedSuggestions.length - 1 ? prev + 1 : prev));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((prev) => (prev > 0 ? prev - 1 : -1));
     } else if (e.key === 'Escape') {
       setIsFocused(false);
-      setSuggestions([]);
+      setUnifiedSuggestions([]);
     }
   };
 
@@ -439,20 +496,56 @@ export default function TopBar({
           </div>
         </div>
 
-        {/* Omnibox Autocomplete & Suggestions Dropdown */}
-        {isFocused && suggestions.length > 0 && (
-          <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden py-1 z-50">
-            {suggestions.map((item, idx) => (
+        {/* Omnibox Autocomplete & Unified Suggestions Dropdown */}
+        {isFocused && unifiedSuggestions.length > 0 && (
+          <div className="absolute left-0 right-0 top-full mt-1 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden py-1 z-50 animate-in fade-in zoom-in-95 duration-150">
+            {unifiedSuggestions.map((item, idx) => (
               <div
                 key={idx}
-                onMouseDown={() => handleSubmit(item)}
-                className={`flex items-center px-3 py-2 cursor-pointer text-xs ${
-                  selectedIndex === idx ? 'bg-indigo-600/30 text-indigo-200' : 'hover:bg-slate-800 text-slate-300'
+                onMouseDown={() => handleSelectSuggestion(item)}
+                className={`flex items-center px-3.5 py-2.5 cursor-pointer text-xs transition-colors border-b border-slate-800/40 last:border-0 ${
+                  selectedIndex === idx ? 'bg-indigo-600/30 text-indigo-200' : 'hover:bg-slate-800/80 text-slate-300'
                 }`}
               >
-                <Search size={13} className="text-slate-500 mr-2.5" />
-                <span className="flex-1">{item}</span>
-                <span className="text-[10px] text-slate-500">Поиск Google</span>
+                {item.type === 'history' ? (
+                  <>
+                    <div className="w-6 h-6 rounded-lg bg-purple-500/15 text-purple-400 flex items-center justify-center mr-2.5 shrink-0">
+                      <Clock size={13} />
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                      <span className="truncate font-medium text-slate-100">{item.title}</span>
+                      <span className="truncate text-[11px] text-slate-400 font-mono">
+                        {item.url.replace(/^https?:\/\/(www\.)?/, '')}
+                      </span>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-semibold shrink-0 ml-2">
+                      История
+                    </span>
+                  </>
+                ) : item.type === 'bookmark' ? (
+                  <>
+                    <div className="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-400 flex items-center justify-center mr-2.5 shrink-0">
+                      <Star size={13} fill="currentColor" />
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col sm:flex-row sm:items-center sm:gap-2">
+                      <span className="truncate font-medium text-slate-100">{item.title}</span>
+                      <span className="truncate text-[11px] text-slate-400 font-mono">
+                        {item.url.replace(/^https?:\/\/(www\.)?/, '')}
+                      </span>
+                    </div>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-semibold shrink-0 ml-2">
+                      Закладка
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <div className="w-6 h-6 rounded-lg bg-slate-800 text-slate-400 flex items-center justify-center mr-2.5 shrink-0">
+                      <Search size={13} />
+                    </div>
+                    <span className="flex-1 truncate text-slate-200">{item.query}</span>
+                    <span className="text-[10px] text-slate-500 shrink-0 ml-2">Поиск Google</span>
+                  </>
+                )}
               </div>
             ))}
           </div>

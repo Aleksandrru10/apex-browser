@@ -41,13 +41,16 @@ contextBridge.exposeInMainWorld('api', {
   bookmarks: {
     getAll: () => ipcRenderer.invoke('bookmarks:get'),
     add: (bm) => ipcRenderer.invoke('bookmarks:add', bm),
-    delete: (id) => ipcRenderer.invoke('bookmarks:delete', id)
+    delete: (id) => ipcRenderer.invoke('bookmarks:delete', id),
+    importHtml: (htmlContent) => ipcRenderer.invoke('bookmarks:importHtml', htmlContent),
+    pickAndImportHtml: () => ipcRenderer.invoke('bookmarks:pickAndImportHtml')
   },
 
   // History
   history: {
     getAll: () => ipcRenderer.invoke('history:get'),
     add: (item) => ipcRenderer.invoke('history:add', item),
+    search: (query, limit) => ipcRenderer.invoke('history:search', query, limit),
     clear: (profileId) => ipcRenderer.invoke('history:clear', profileId)
   },
 

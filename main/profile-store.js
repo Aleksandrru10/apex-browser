@@ -1,4 +1,4 @@
-﻿const fs = require('fs');
+const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
 
@@ -237,18 +237,95 @@ class ProfileStore {
   }
 
   addHistory(entry) {
-    if (!entry.url || entry.url.startsWith('about:') || entry.url.startsWith('chrome:')) return;
+    if (!entry.url || entry.url.startsWith('about:') || entry.url.startsWith('chrome:') || entry.url.startsWith('apex:')) return;
     let list = this.getHistory();
+    const existing = list.find(item => item.url === entry.url);
+    const hasGoodTitle = entry.title && entry.title !== entry.url && entry.title.trim().length > 0;
+    const title = hasGoodTitle ? entry.title.trim() : (existing?.title || entry.title || entry.url);
+
     list = list.filter(item => item.url !== entry.url);
     list.unshift({
       id: 'hist_' + Date.now(),
-      title: entry.title || entry.url,
+      title: title,
       url: entry.url,
       timestamp: Date.now(),
       profileId: entry.profileId || 'profile_default'
     });
-    if (list.length > 1000) list = list.slice(0, 1000);
+    if (list.length > 3000) list = list.slice(0, 3000);
     this.saveJson(this.historyFile, list);
+  }
+
+  searchHistory(query, limit = 8) {
+    if (!query || !query.trim()) return [];
+    const q = query.trim().toLowerCase();
+    const words = q.split(/\s+/).filter(Boolean);
+    const list = this.getHistory();
+    const results = [];
+
+    for (const item of list) {
+      const url = (item.url || '').toLowerCase();
+      const title = (item.title || '').toLowerCase();
+
+      const allWordsMatch = words.every(w => url.includes(w) || title.includes(w));
+      if (allWordsMatch) {
+        let score = 0;
+        const cleanUrl = url.replace(/^https?:\/\/(www\.)?/, '');
+        if (cleanUrl.startsWith(q) || url.startsWith(q)) {
+          score += 200;
+        } else if (title.startsWith(q)) {
+          score += 150;
+        } else if (cleanUrl.includes(q)) {
+          score += 100;
+        } else if (title.includes(q)) {
+          score += 80;
+        } else {
+          score += 40;
+        }
+        results.push({ ...item, score });
+      }
+    }
+
+    results.sort((a, b) => b.score - a.score || b.timestamp - a.timestamp);
+    return results.slice(0, limit);
+  }
+
+  importBookmarksFromHtml(htmlContent) {
+    if (!htmlContent || typeof htmlContent !== 'string') {
+      return { success: false, message: 'Файл пуст или поврежден', count: 0 };
+    }
+
+    const regex = /<a\s+(?:[^>]*?\s+)?href="([^"]*)"[^>]*>(.*?)<\/a>/gi;
+    const list = this.getBookmarks();
+    const existingUrls = new Set(list.map(b => b.url));
+    let match;
+    let addedCount = 0;
+
+    while ((match = regex.exec(htmlContent)) !== null) {
+      const url = match[1];
+      let title = match[2] ? match[2].replace(/<[^>]+>/g, '').trim() : '';
+      title = title.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+
+      if (url && (url.startsWith('http://') || url.startsWith('https://')) && !existingUrls.has(url)) {
+        list.push({
+          id: 'bm_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+          title: title || url,
+          url: url,
+          dateAdded: Date.now()
+        });
+        existingUrls.add(url);
+        addedCount++;
+      }
+    }
+
+    if (addedCount > 0) {
+      this.saveJson(this.bookmarksFile, list);
+    }
+
+    return {
+      success: true,
+      count: addedCount,
+      message: `Успешно импортировано закладок: ${addedCount}`
+    };
   }
 
   clearHistory(profileId = null) {

@@ -19,7 +19,8 @@ export default function SplitView({
   onNavigateTab,
   webviewRefCallback,
   isDarkMode = true,
-  forceDark = false
+  forceDark = false,
+  onPasswordSubmitted
 }) {
   const [splitPercent, setSplitPercent] = useState(50);
   const isDragging = useRef(false);
@@ -84,6 +85,7 @@ export default function SplitView({
               webviewRefCallback={webviewRefCallback}
               isDarkMode={isDarkMode}
               forceDark={forceDark}
+              onPasswordSubmitted={onPasswordSubmitted}
             />
           )}
         </div>
@@ -159,6 +161,7 @@ export default function SplitView({
                 webviewRefCallback={webviewRefCallback}
                 isDarkMode={isDarkMode}
                 forceDark={forceDark}
+                onPasswordSubmitted={onPasswordSubmitted}
               />
             )
           ) : (

@@ -14,6 +14,7 @@ import TabContextMenu from './components/TabContextMenu';
 import Toast from './components/Toast';
 import PasswordModal from './components/PasswordModal';
 import BrowserImportModal from './components/BrowserImportModal';
+import { Key, Check, X } from 'lucide-react';
 
 export default function App() {
   // Profiles
@@ -107,6 +108,7 @@ export default function App() {
   const [passwordModalFilter, setPasswordModalFilter] = useState('');
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [savedPasswordsForActiveTab, setSavedPasswordsForActiveTab] = useState([]);
+  const [pendingPasswordSave, setPendingPasswordSave] = useState(null);
 
   // Tab Context Menu & Toasts
   const [tabContextMenu, setTabContextMenu] = useState({
@@ -647,6 +649,50 @@ export default function App() {
     }
   };
 
+  // Password auto-capture when submitting login forms
+  const handlePasswordSubmitted = async (creds) => {
+    if (!creds || !creds.password || creds.password.length < 2) return;
+    if (!window.api?.passwords) return;
+
+    try {
+      const existing = await window.api.passwords.getByUrl(creds.url);
+      const alreadySaved = (existing || []).some(item => 
+        item.password === creds.password && 
+        (!creds.username || !item.username || item.username.toLowerCase() === creds.username.toLowerCase())
+      );
+
+      if (alreadySaved) return;
+
+      setPendingPasswordSave(creds);
+    } catch (e) {
+      setPendingPasswordSave(creds);
+    }
+  };
+
+  const handleConfirmSavePassword = async () => {
+    if (!pendingPasswordSave || !window.api?.passwords) return;
+    try {
+      const res = await window.api.passwords.add({
+        name: pendingPasswordSave.hostname || pendingPasswordSave.url,
+        url: pendingPasswordSave.url,
+        username: pendingPasswordSave.username || '',
+        password: pendingPasswordSave.password,
+        note: 'Сохранено автоматически при авторизации'
+      });
+
+      if (res && res.success) {
+        showToast('Пароль сохранён в хранилище Apex 🔑');
+        if (activeTab?.url) {
+          window.api.passwords.getByUrl(activeTab.url).then(r => setSavedPasswordsForActiveTab(r || []));
+        }
+      }
+    } catch (e) {
+      showToast('⚠️ Ошибка при сохранении пароля');
+    } finally {
+      setPendingPasswordSave(null);
+    }
+  };
+
   // Profile operations
   const handleSelectProfile = async (id) => {
     await window.api.profiles.setActive(id);
@@ -782,6 +828,7 @@ export default function App() {
               webviewRefCallback={handleRegisterWebview}
               isDarkMode={isDarkMode}
               forceDark={settings.forceDark}
+              onPasswordSubmitted={handlePasswordSubmitted}
             />
           ) : (
             /* Single Tab View */
@@ -814,6 +861,7 @@ export default function App() {
                         webviewRefCallback={handleRegisterWebview}
                         isDarkMode={isDarkMode}
                         forceDark={settings.forceDark}
+                        onPasswordSubmitted={handlePasswordSubmitted}
                       />
                     )}
                   </div>
@@ -959,6 +1007,63 @@ export default function App() {
         onClose={() => setIsImportModalOpen(false)}
         onImportComplete={handleReloadUserData}
       />
+
+      {/* 12. Floating Save Password Offer Prompt */}
+      {pendingPasswordSave && (
+        <div className="fixed top-14 right-6 z-50 w-80 bg-slate-900/95 backdrop-blur-md border border-amber-500/40 rounded-2xl shadow-2xl p-4 animate-in fade-in slide-in-from-top-3 duration-200 text-xs">
+          <div className="flex items-start justify-between pb-2.5 border-b border-slate-800">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                <Key size={16} />
+              </div>
+              <div>
+                <div className="font-bold text-slate-100 text-xs">
+                  Сохранить пароль?
+                </div>
+                <div className="text-[11px] text-slate-400 truncate max-w-[170px]">
+                  для {pendingPasswordSave.hostname || 'этого сайта'}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => setPendingPasswordSave(null)}
+              className="p-1 text-slate-500 hover:text-slate-300 rounded"
+              title="Закрыть"
+            >
+              <X size={14} />
+            </button>
+          </div>
+
+          <div className="py-3 space-y-1.5 font-mono text-[11px]">
+            <div className="flex items-center justify-between text-slate-300">
+              <span className="text-slate-500 font-sans text-[11px]">Логин:</span>
+              <span className="font-semibold truncate max-w-[170px] text-slate-200">
+                {pendingPasswordSave.username || '(без логина)'}
+              </span>
+            </div>
+            <div className="flex items-center justify-between text-slate-300">
+              <span className="text-slate-500 font-sans text-[11px]">Пароль:</span>
+              <span className="tracking-widest text-slate-400">••••••••</span>
+            </div>
+          </div>
+
+          <div className="pt-2.5 flex items-center justify-end gap-2 border-t border-slate-800">
+            <button
+              onClick={() => setPendingPasswordSave(null)}
+              className="px-3 py-1.5 text-slate-400 hover:text-slate-200 text-xs font-medium transition-colors"
+            >
+              Не сейчас
+            </button>
+            <button
+              onClick={handleConfirmSavePassword}
+              className="px-4 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-amber-950/40 transition-all"
+            >
+              <Check size={13} strokeWidth={3} />
+              Сохранить
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

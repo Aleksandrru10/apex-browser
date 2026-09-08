@@ -247,6 +247,33 @@ ipcMain.handle('bookmarks:delete', (event, id) => {
   return profileStore.deleteBookmark(id);
 });
 
+ipcMain.handle('bookmarks:importHtml', (event, htmlContent) => {
+  return profileStore.importBookmarksFromHtml(htmlContent);
+});
+
+ipcMain.handle('bookmarks:pickAndImportHtml', async () => {
+  const result = await dialog.showOpenDialog({
+    title: 'Выберите HTML-файл закладок (из любого браузера)',
+    filters: [
+      { name: 'HTML Закладки (*.html, *.htm)', extensions: ['html', 'htm'] },
+      { name: 'Все файлы (*.*)', extensions: ['*'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { success: false, message: 'Отменено пользователем', count: 0 };
+  }
+
+  try {
+    const filePath = result.filePaths[0];
+    const content = fs.readFileSync(filePath, 'utf8');
+    return profileStore.importBookmarksFromHtml(content);
+  } catch (err) {
+    return { success: false, message: err.message, count: 0 };
+  }
+});
+
 // History
 ipcMain.handle('history:get', () => {
   return profileStore.getHistory();
@@ -254,6 +281,10 @@ ipcMain.handle('history:get', () => {
 
 ipcMain.handle('history:add', (event, item) => {
   return profileStore.addHistory(item);
+});
+
+ipcMain.handle('history:search', (event, query, limit) => {
+  return profileStore.searchHistory(query, limit);
 });
 
 ipcMain.handle('history:clear', (event, profileId) => {
