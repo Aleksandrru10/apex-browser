@@ -8,6 +8,8 @@ dist-installer/
 
 # Temporary and local storage
 temp_storage/
+__pycache__/
+*.pyc
 *.log
 *.sqlite
 *.db
